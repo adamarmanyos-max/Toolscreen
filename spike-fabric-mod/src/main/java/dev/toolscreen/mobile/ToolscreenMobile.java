@@ -69,6 +69,17 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile int nativeWidth;
     private static volatile int nativeHeight;
 
+    // ---- EyeZoom ----------------------------------------------------------
+    // Per-mode, matching the Windows tool, where the EyeZoom settings live
+    // under Modes rather than as a global toggle.
+    private static volatile List<String> eyeZoomModes = List.of("Eye Measure");
+    private static volatile int eyeZoomRegionWidth = 16;
+    private static volatile int eyeZoomRegionHeight = 8;
+    private static volatile int eyeZoomFactor = 6;
+    private static volatile int eyeZoomRulerMax = 8;
+    private static volatile double eyeZoomTop = 0.12;
+    private static volatile boolean eyeZoomReported;
+
     /** Where the rendered area sits within the real screen. */
     public enum Align { LEFT, CENTER, RIGHT }
 
@@ -94,6 +105,50 @@ public final class ToolscreenMobile implements ClientModInitializer {
         if (centeringReported) return;
         centeringReported = true;
         LOGGER.info("[{}] centring active (align={})", MOD_ID, align);
+    }
+
+    /** True when the active mode is one the config lists for EyeZoom. */
+    public static boolean eyeZoomActive() {
+        String active = activeMode().name();
+        for (String name : eyeZoomModes) {
+            if (name.equalsIgnoreCase(active)) return true;
+        }
+        return false;
+    }
+
+    public static int eyeZoomRegionWidth() {
+        return eyeZoomRegionWidth;
+    }
+
+    public static int eyeZoomRegionHeight() {
+        return eyeZoomRegionHeight;
+    }
+
+    public static int eyeZoomFactor() {
+        return eyeZoomFactor;
+    }
+
+    public static int eyeZoomRulerMax() {
+        return eyeZoomRulerMax;
+    }
+
+    /** Vertical position of the panel, as a fraction of the strip's height. */
+    public static double eyeZoomTop() {
+        return eyeZoomTop;
+    }
+
+    /**
+     * Logged once when the overlay actually draws.
+     *
+     * <p>Its mixin is optional, so a failed injection is silent by design.
+     * Without this line there would be no way to tell "attached and drawing"
+     * from "never attached" except by squinting at the screen.
+     */
+    public static void noteEyeZoomActive() {
+        if (eyeZoomReported) return;
+        eyeZoomReported = true;
+        LOGGER.info("[{}] eyezoom drawing: region {}x{} at {}x zoom, ruler +/-{}",
+                MOD_ID, eyeZoomRegionWidth, eyeZoomRegionHeight, eyeZoomFactor, eyeZoomRulerMax);
     }
 
     public static void recordNativeSize(int width, int height) {
@@ -184,9 +239,46 @@ public final class ToolscreenMobile implements ClientModInitializer {
         toggleKey = KeyCodes.resolve(props.getProperty("toggleKey"), DEFAULT_TOGGLE_KEY);
         align = parseAlign(props.getProperty("align"), Align.CENTER);
 
+        eyeZoomModes = parseNameList(props.getProperty("eyezoomModes"), eyeZoomModes);
+        eyeZoomRegionWidth = clampInt(props.getProperty("eyezoomRegionWidth"), eyeZoomRegionWidth, 2, 256);
+        eyeZoomRegionHeight = clampInt(props.getProperty("eyezoomRegionHeight"), eyeZoomRegionHeight, 2, 256);
+        eyeZoomFactor = clampInt(props.getProperty("eyezoomFactor"), eyeZoomFactor, 1, 64);
+        eyeZoomRulerMax = clampInt(props.getProperty("eyezoomRulerMax"), eyeZoomRulerMax, 1, 128);
+        eyeZoomTop = clampDouble(props.getProperty("eyezoomTop"), eyeZoomTop, 0.0, 0.95);
+
         List<Mode> parsed = parseModes(props.getProperty("modes"));
         if (!parsed.isEmpty()) {
             modes = List.copyOf(parsed);
+        }
+    }
+
+    private static List<String> parseNameList(String raw, List<String> fallback) {
+        if (raw == null || raw.isBlank()) return fallback;
+        List<String> names = new ArrayList<>();
+        for (String part : raw.split(",")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) names.add(trimmed);
+        }
+        return names.isEmpty() ? fallback : List.copyOf(names);
+    }
+
+    private static int clampInt(String raw, int fallback, int min, int max) {
+        if (raw == null) return fallback;
+        try {
+            return Math.min(max, Math.max(min, Integer.parseInt(raw.trim())));
+        } catch (NumberFormatException e) {
+            LOGGER.warn("[{}] bad integer '{}', using {}", MOD_ID, raw.trim(), fallback);
+            return fallback;
+        }
+    }
+
+    private static double clampDouble(String raw, double fallback, double min, double max) {
+        if (raw == null) return fallback;
+        try {
+            return Math.min(max, Math.max(min, Double.parseDouble(raw.trim())));
+        } catch (NumberFormatException e) {
+            LOGGER.warn("[{}] bad number '{}', using {}", MOD_ID, raw.trim(), fallback);
+            return fallback;
         }
     }
 
@@ -237,6 +329,12 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("toggleKey", KeyCodes.nameOf(DEFAULT_TOGGLE_KEY, Integer.toString(DEFAULT_TOGGLE_KEY)));
         props.setProperty("align", Align.CENTER.name());
         props.setProperty("modes", modeList.toString());
+        props.setProperty("eyezoomModes", String.join(", ", eyeZoomModes));
+        props.setProperty("eyezoomRegionWidth", Integer.toString(eyeZoomRegionWidth));
+        props.setProperty("eyezoomRegionHeight", Integer.toString(eyeZoomRegionHeight));
+        props.setProperty("eyezoomFactor", Integer.toString(eyeZoomFactor));
+        props.setProperty("eyezoomRulerMax", Integer.toString(eyeZoomRulerMax));
+        props.setProperty("eyezoomTop", Double.toString(eyeZoomTop));
 
         try {
             Files.createDirectories(file.getParent());
