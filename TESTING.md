@@ -64,8 +64,19 @@ name for `default`.
 Launch the 1.16.1 Fabric profile. Two checks before anything else:
 
 - The mod list / log should show `toolscreen-mobile` loading.
-- `instances/default/logs/latest.log` should contain a line like
-  `[toolscreen-mobile] ready: 4 mode(s), toggle key GRAVE_ACCENT (96)`.
+- `instances/default/logs/latest.log` should contain **two** lines:
+
+  ```
+  [toolscreen-mobile] ready: 4 mode(s), toggle key GRAVE_ACCENT (96)
+  [toolscreen-mobile] centring active (align=CENTER)
+  ```
+
+  They mean different things. The first says the mod loaded and read its
+  config. The second says the centring redirect actually attached — it only
+  appears once a frame has been drawn through it. If the first appears
+  without the second, centring degraded silently and the strip will render
+  against the left edge; that is worth reporting, because the game will not
+  crash to tell you.
 
 If the game crashes on launch, stop here and keep `latest.log` — a mixin failure
 names the exact injection point that went wrong, which is enough to fix it.
@@ -110,6 +121,8 @@ modes=Native:1.0x1.0, Thin:0.2x1.0, Eye Measure:0.1x1.0, Wide Short:1.0x0.45
 - If `0.2` is too narrow or too wide, change it and relaunch — no rebuild.
 - `toggleKey` takes a name (`GRAVE_ACCENT`, `BACKSLASH`, `RIGHT_BRACKET`, `G`)
   or a raw number.
+- `align` takes `CENTER` (default), `LEFT` or `RIGHT`. `LEFT` is where GL puts
+  the strip unaided, since its viewport origin is the bottom-left corner.
 
 ## 7. If something goes wrong
 
@@ -119,7 +132,10 @@ thing — it contains the mod's own log lines, and any mixin or crash detail.
 Useful distinctions:
 
 - **Game will not start at all** → likely a mixin injection failure; the log
-  names the method.
+  names the method. `Scanned 0 target(s)` means the selector matched nothing,
+  which is a wrong target rather than a wrong idea. Note that the centring
+  mixin can no longer cause this: it is `require = 0`, so it degrades to
+  left-aligned instead of aborting startup.
 - **Game starts, no `[toolscreen-mobile]` line** → the jar is not being loaded;
   check it is in `mods/` and that the profile really is Fabric 1.16.1.
 - **Loads, but `` ` `` does nothing** → key not reaching the game. Try setting
