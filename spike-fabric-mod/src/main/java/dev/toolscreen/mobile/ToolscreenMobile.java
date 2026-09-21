@@ -73,10 +73,15 @@ public final class ToolscreenMobile implements ClientModInitializer {
     // Per-mode, matching the Windows tool, where the EyeZoom settings live
     // under Modes rather than as a global toggle.
     private static volatile List<String> eyeZoomModes = List.of("Eye Measure");
-    private static volatile int eyeZoomRegionWidth = 16;
-    private static volatile int eyeZoomRegionHeight = 8;
-    private static volatile int eyeZoomFactor = 6;
-    private static volatile int eyeZoomRulerMax = 8;
+    // Sized for a narrow strip. In Eye Measure the strip is only ~190 real
+    // pixels wide, and Minecraft picks GUI scale 1 at that width, so one GUI
+    // unit is one real pixel: a zoom of 6 meant six real pixels per game pixel,
+    // far too fine to count. 10 with a smaller region keeps the panel inside
+    // the strip while making each pixel legible.
+    private static volatile int eyeZoomRegionWidth = 12;
+    private static volatile int eyeZoomRegionHeight = 6;
+    private static volatile int eyeZoomFactor = 10;
+    private static volatile int eyeZoomRulerMax = 6;
     private static volatile double eyeZoomTop = 0.12;
     private static volatile boolean eyeZoomReported;
 
