@@ -84,6 +84,7 @@ public abstract class FramebufferMixin {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.getWindow() == null) return;
         if (width != client.getWindow().getFramebufferWidth()) return;
+        EyeZoom.renderBackground(lastBlitX, lastBlitY, lastBlitW, lastBlitH);
         EyeZoom.renderSide(client.textRenderer, lastBlitX, lastBlitY, lastBlitW, lastBlitH);
     }
 

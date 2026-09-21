@@ -272,28 +272,75 @@ public final class EyeZoom {
      * earlier, then restores both. Coordinates here are real screen pixels,
      * not GUI units, because outside the strip there is no GUI scale.
      */
-    public static void renderSide(TextRenderer font, int blitX, int blitY, int blitW, int blitH) {
-        if (!ToolscreenMobile.eyeZoomSide() || !ToolscreenMobile.eyeZoomActive()) return;
-
-        int[] pixels = lastPixels;
-        if (pixels == null) return;
+    /**
+     * Fills the letterboxed area around the strip, replacing the bare black.
+     *
+     * <p>The original does this too — its localization table carries
+     * {@code modes.background}, {@code modes.bg_image_path} and
+     * {@code modes.color_stops} — so the colour behind the game is part of the
+     * tool rather than the desktop showing through.
+     *
+     * <p>Only the four bands around the blit are painted. Filling the whole
+     * surface would paint over the strip that was just drawn into it.
+     */
+    public static void renderBackground(int blitX, int blitY, int blitW, int blitH) {
+        if (!ToolscreenMobile.backgroundEnabled() || !ToolscreenMobile.isOverrideActive()) return;
 
         int realW = ToolscreenMobile.nativeWidth();
         int realH = ToolscreenMobile.nativeHeight();
         if (realW < 2 || realH < 2) return;
 
-        int regionW = lastRegionW;
-        int regionH = lastRegionH;
-        int zoom = ToolscreenMobile.eyeZoomFactor();
-        int panelW = regionW * zoom;
-        int panelH = regionH * zoom;
-        int panelX = (int) (realW * ToolscreenMobile.eyeZoomLeft()) - panelW / 2;
-        int panelY = (int) (realH * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
+        // The blit rectangle is in GL coordinates, whose origin is bottom-left;
+        // everything drawn here is in the top-left origin the ortho sets up.
+        int left = blitX;
+        int right = blitX + blitW;
+        int top = realH - (blitY + blitH);
+        int bottom = realH - blitY;
 
-        // Both matrix stacks are pushed and popped, and the viewport is put
-        // back to the blit's own rectangle afterwards. Minecraft resets all of
-        // this at the top of the next frame, but leaving the pipeline in a
-        // state it did not set is how one broken frame becomes a broken screen.
+        withFullSurface(blitX, blitY, blitW, blitH, () -> {
+            MatrixStack matrices = new MatrixStack();
+            int from = ToolscreenMobile.backgroundTop();
+            int to = ToolscreenMobile.backgroundBottom();
+
+            // A gradient in horizontal bands. DrawableHelper's own gradient
+            // helper is not public, and bands are cheap enough at this count
+            // that reaching for anything cleverer would not pay for itself.
+            int bands = 48;
+            for (int i = 0; i < bands; i++) {
+                int y0 = realH * i / bands;
+                int y1 = realH * (i + 1) / bands;
+                int colour = lerpColour(from, to, i / (float) (bands - 1));
+
+                if (y1 <= top || y0 >= bottom) {
+                    DrawableHelper.fill(matrices, 0, y0, realW, y1, colour);
+                } else {
+                    int bandTop = Math.max(y0, top);
+                    int bandBottom = Math.min(y1, bottom);
+                    if (y0 < top) DrawableHelper.fill(matrices, 0, y0, realW, top, colour);
+                    if (y1 > bottom) DrawableHelper.fill(matrices, 0, bottom, realW, y1, colour);
+                    if (left > 0) DrawableHelper.fill(matrices, 0, bandTop, left, bandBottom, colour);
+                    if (right < realW) DrawableHelper.fill(matrices, right, bandTop, realW, bandBottom, colour);
+                }
+            }
+        });
+    }
+
+    private static int lerpColour(int from, int to, float t) {
+        int a = 0xFF;
+        int r = (int) (((from >> 16) & 0xFF) + (((to >> 16) & 0xFF) - ((from >> 16) & 0xFF)) * t);
+        int g = (int) (((from >> 8) & 0xFF) + (((to >> 8) & 0xFF) - ((from >> 8) & 0xFF)) * t);
+        int b = (int) ((from & 0xFF) + ((to & 0xFF) - (from & 0xFF)) * t);
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    /**
+     * Runs {@code body} with a viewport and projection covering the whole
+     * surface, restoring both afterwards.
+     */
+    private static void withFullSurface(int blitX, int blitY, int blitW, int blitH, Runnable body) {
+        int realW = ToolscreenMobile.nativeWidth();
+        int realH = ToolscreenMobile.nativeHeight();
+
         GlStateManager.matrixMode(GL11.GL_PROJECTION);
         GlStateManager.pushMatrix();
         GlStateManager.loadIdentity();
@@ -306,10 +353,7 @@ public final class EyeZoom {
         GlStateManager.enableBlend();
 
         try {
-            MatrixStack matrices = new MatrixStack();
-            drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoom);
-            drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoom);
-            drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoom);
+            body.run();
         } finally {
             GlStateManager.viewport(blitX, blitY, blitW, blitH);
             GlStateManager.matrixMode(GL11.GL_MODELVIEW);
@@ -318,5 +362,31 @@ public final class EyeZoom {
             GlStateManager.popMatrix();
             GlStateManager.matrixMode(GL11.GL_MODELVIEW);
         }
+    }
+
+    public static void renderSide(TextRenderer font, int blitX, int blitY, int blitW, int blitH) {
+        if (!ToolscreenMobile.eyeZoomSide() || !ToolscreenMobile.eyeZoomActive()) return;
+
+        final int[] pixels = lastPixels;
+        if (pixels == null) return;
+
+        int realW = ToolscreenMobile.nativeWidth();
+        int realH = ToolscreenMobile.nativeHeight();
+        if (realW < 2 || realH < 2) return;
+
+        final int regionW = lastRegionW;
+        final int regionH = lastRegionH;
+        final int zoom = ToolscreenMobile.eyeZoomFactor();
+        final int panelW = regionW * zoom;
+        final int panelH = regionH * zoom;
+        final int panelX = (int) (realW * ToolscreenMobile.eyeZoomLeft()) - panelW / 2;
+        final int panelY = (int) (realH * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
+
+        withFullSurface(blitX, blitY, blitW, blitH, () -> {
+            MatrixStack matrices = new MatrixStack();
+            drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoom);
+            drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoom);
+            drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoom);
+        });
     }
 }

@@ -93,6 +93,12 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile double eyeZoomTop = 0.5;
     private static volatile double eyeZoomLeft = 0.23;
     private static volatile boolean eyeZoomSide = true;
+
+    // The original fills the area around the game rather than leaving it bare;
+    // its localization table carries background, bg_image_path and color_stops.
+    private static volatile boolean backgroundEnabled = true;
+    private static volatile int backgroundTop = 0x1A0533;
+    private static volatile int backgroundBottom = 0x4A1594;
     private static volatile boolean eyeZoomReported;
     private static volatile boolean overlayHookReported;
     private static volatile boolean crosshairEnabled = true;
@@ -224,6 +230,18 @@ public final class ToolscreenMobile implements ClientModInitializer {
         return eyeZoomSide;
     }
 
+    public static boolean backgroundEnabled() {
+        return backgroundEnabled;
+    }
+
+    public static int backgroundTop() {
+        return backgroundTop;
+    }
+
+    public static int backgroundBottom() {
+        return backgroundBottom;
+    }
+
     public static void recordNativeSize(int width, int height) {
         nativeWidth = width;
         nativeHeight = height;
@@ -325,6 +343,10 @@ public final class ToolscreenMobile implements ClientModInitializer {
         eyeZoomLeft = clampDouble(props.getProperty("eyezoomLeft"), eyeZoomLeft, 0.0, 1.0);
         eyeZoomSide = !"false".equalsIgnoreCase(String.valueOf(props.getProperty("eyezoomSide")).trim());
 
+        backgroundEnabled = !"false".equalsIgnoreCase(String.valueOf(props.getProperty("background")).trim());
+        backgroundTop = parseColour(props.getProperty("backgroundTop"), backgroundTop);
+        backgroundBottom = parseColour(props.getProperty("backgroundBottom"), backgroundBottom);
+
         List<Mode> parsed = parseModes(props.getProperty("modes"));
         if (!parsed.isEmpty()) {
             modes = List.copyOf(parsed);
@@ -339,6 +361,19 @@ public final class ToolscreenMobile implements ClientModInitializer {
             if (!trimmed.isEmpty()) names.add(trimmed);
         }
         return names.isEmpty() ? fallback : List.copyOf(names);
+    }
+
+    /** Parses {@code #RRGGBB} or {@code RRGGBB}; falls back on anything else. */
+    private static int parseColour(String raw, int fallback) {
+        if (raw == null) return fallback;
+        String hex = raw.trim();
+        if (hex.startsWith("#")) hex = hex.substring(1);
+        try {
+            return (int) (Long.parseLong(hex, 16) & 0xFFFFFF);
+        } catch (NumberFormatException e) {
+            LOGGER.warn("[{}] bad colour '{}', using #{}", MOD_ID, raw.trim(), Integer.toHexString(fallback));
+            return fallback;
+        }
     }
 
     private static int clampInt(String raw, int fallback, int min, int max) {
@@ -419,6 +454,9 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("eyezoomTop", Double.toString(eyeZoomTop));
         props.setProperty("eyezoomLeft", Double.toString(eyeZoomLeft));
         props.setProperty("eyezoomSide", Boolean.toString(eyeZoomSide));
+        props.setProperty("background", Boolean.toString(backgroundEnabled));
+        props.setProperty("backgroundTop", String.format("#%06X", backgroundTop));
+        props.setProperty("backgroundBottom", String.format("#%06X", backgroundBottom));
 
         try {
             Files.createDirectories(file.getParent());
