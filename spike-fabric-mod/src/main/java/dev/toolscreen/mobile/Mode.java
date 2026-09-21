@@ -3,52 +3,69 @@ package dev.toolscreen.mobile;
 /**
  * A screen shape, equivalent to one entry under Toolscreen's "Modes" tab.
  *
- * <p>Dimensions are fractions of the device's native surface rather than
- * absolute pixels. Toolscreen on Windows stores absolute {@code game_width} /
- * {@code game_height} because a desktop monitor is a fixed known size; on iOS
- * the same config has to survive an iPhone, an iPad and an external display,
- * so fractions travel better. {@link #resolve} turns them back into pixels.
+ * <p>Each dimension is either a <strong>fraction</strong> of the device's native
+ * surface or an <strong>absolute pixel count</strong>, decided by magnitude: a
+ * value of {@code 1.0} or less is a fraction, anything larger is pixels. So
+ * {@code 0.2} is a fifth of the screen, while {@code 280} is 280 pixels.
  *
- * <p>A mode with both fractions at 1.0 is the pass-through / native mode.
+ * <p>Both exist because they answer different needs. Fractions travel across an
+ * iPhone, an iPad and an external display, which absolute pixels cannot.
+ * Absolute pixels let a Toolscreen preset be copied over exactly — that tool
+ * stores {@code game_width}/{@code game_height} in pixels, and a desktop monitor
+ * is a fixed known size, so its published mode dimensions are only meaningful
+ * as pixels.
+ *
+ * <p>A mode whose dimensions are both the fraction 1.0 is the pass-through /
+ * native mode.
  */
-public record Mode(String name, double widthFraction, double heightFraction) {
+public record Mode(String name, double width, double height) {
 
     public Mode {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("mode name must not be blank");
         }
-        widthFraction = clamp(widthFraction);
-        heightFraction = clamp(heightFraction);
+        width = validate(width);
+        height = validate(height);
     }
 
-    private static double clamp(double fraction) {
-        if (Double.isNaN(fraction)) return 1.0;
-        return Math.min(1.0, Math.max(0.01, fraction));
+    private static double validate(double value) {
+        if (Double.isNaN(value) || value <= 0.0) return 1.0;
+        return value;
+    }
+
+    /** True when this dimension is a fraction of the screen rather than a pixel count. */
+    private static boolean isFraction(double value) {
+        return value <= 1.0;
     }
 
     public boolean isNative() {
-        return widthFraction >= 1.0 && heightFraction >= 1.0;
+        return isFraction(width) && width >= 1.0 && isFraction(height) && height >= 1.0;
     }
 
     /**
-     * Converts a fraction of the native surface into a concrete pixel count.
+     * Converts one configured dimension into a concrete pixel count.
      *
-     * <p>Forced even and to a floor of 2: Amethyst's own sizing path rounds
-     * odd values down ({@code SurfaceViewController.updateSavedResolution}),
-     * and a zero or odd framebuffer dimension makes Minecraft's render target
+     * <p>Forced even and to a floor of 2: Amethyst's own sizing path rounds odd
+     * values down ({@code SurfaceViewController.updateSavedResolution}), and a
+     * zero or odd framebuffer dimension makes Minecraft's render target
      * allocation misbehave.
+     *
+     * <p>Clamped to the native size, since reporting a framebuffer larger than
+     * the real surface would place the blit partly off-screen.
      */
-    public static int resolve(int nativePixels, double fraction) {
-        int resolved = (int) Math.round(nativePixels * fraction);
+    public static int resolve(int nativePixels, double value) {
+        double raw = isFraction(value) ? nativePixels * value : value;
+        int resolved = (int) Math.round(raw);
+        if (resolved > nativePixels) resolved = nativePixels;
         if (resolved % 2 != 0) resolved--;
         return Math.max(2, resolved);
     }
 
     public int resolveWidth(int nativeWidth) {
-        return resolve(nativeWidth, widthFraction);
+        return resolve(nativeWidth, width);
     }
 
     public int resolveHeight(int nativeHeight) {
-        return resolve(nativeHeight, heightFraction);
+        return resolve(nativeHeight, height);
     }
 }

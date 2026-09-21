@@ -114,11 +114,15 @@ directly in Files:
 
 ```properties
 toggleKey=GRAVE_ACCENT
-modes=Native:1.0x1.0, Thin:0.2x1.0, Eye Measure:0.1x1.0, Wide Short:1.0x0.45
+align=CENTER
+modes=Native:1.0x1.0, Thin:0.14x1.0, Eye Measure:0.08x1.0, Wide Short:1.0x0.25
 ```
 
-- Numbers are **fractions of your screen**, so `0.2` is one fifth of the width.
-- If `0.2` is too narrow or too wide, change it and relaunch — no rebuild.
+- A number of `1.0` or less is a **fraction of your screen**, so `0.14` is 14%
+  of the width. Anything larger is an **absolute pixel count**, so `Thin:280x1024`
+  is exactly 280×1024 — the form Toolscreen uses, so its presets can be copied
+  straight across.
+- If a mode is too narrow or too wide, change it and relaunch — no rebuild.
 - `toggleKey` takes a name (`GRAVE_ACCENT`, `BACKSLASH`, `RIGHT_BRACKET`, `G`)
   or a raw number.
 - `align` takes `CENTER` (default), `LEFT` or `RIGHT`. `LEFT` is where GL puts

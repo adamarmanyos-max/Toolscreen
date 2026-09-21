@@ -41,11 +41,18 @@ public final class ToolscreenMobile implements ClientModInitializer {
      */
     private static final int DEFAULT_TOGGLE_KEY = 96;
 
+    /**
+     * Ratios estimated from screenshots of the Windows tool: its thin mode runs
+     * about 1:5 and its wide mode about 5.8:1, both far more extreme than the
+     * first guesses here (1:3.5 and 3.2:1). Expressed as fractions so they hold
+     * on any device; to copy a Toolscreen preset exactly, use absolute pixels
+     * instead, e.g. {@code Thin:280x1024}.
+     */
     private static final List<Mode> DEFAULT_MODES = List.of(
             new Mode("Native", 1.00, 1.00),
-            new Mode("Thin", 0.20, 1.00),
-            new Mode("Eye Measure", 0.10, 1.00),
-            new Mode("Wide Short", 1.00, 0.45)
+            new Mode("Thin", 0.14, 1.00),
+            new Mode("Eye Measure", 0.08, 1.00),
+            new Mode("Wide Short", 1.00, 0.25)
     );
 
     private static volatile List<Mode> modes = DEFAULT_MODES;
@@ -223,7 +230,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         for (Mode mode : DEFAULT_MODES) {
             if (modeList.length() > 0) modeList.append(", ");
             modeList.append(mode.name()).append(':')
-                    .append(mode.widthFraction()).append('x').append(mode.heightFraction());
+                    .append(mode.width()).append('x').append(mode.height());
         }
 
         Properties props = new Properties();
@@ -238,8 +245,10 @@ public final class ToolscreenMobile implements ClientModInitializer {
                         + "toggleKey = the key that cycles modes: a GLFW key name such as "
                         + "GRAVE_ACCENT, BACKSLASH, RIGHT_BRACKET or G, or a raw numeric code. "
                         + "align = LEFT, CENTER or RIGHT: where the rendered area sits on screen. "
-                        + "modes = comma separated Name:WidthFractionxHeightFraction, "
-                        + "fractions of the native surface, 0.01 to 1.0.");
+                        + "modes = comma separated Name:WidthxHeight. A value of 1.0 or less "
+                        + "is a fraction of the screen (0.14 = 14% of the width); anything "
+                        + "larger is an absolute pixel count (280 = 280 pixels), which is how "
+                        + "Toolscreen presets are written.");
             }
         } catch (IOException e) {
             LOGGER.warn("[{}] could not write default config to {}", MOD_ID, file, e);

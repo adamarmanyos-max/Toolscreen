@@ -46,7 +46,7 @@ First launch writes `config/toolscreen-mobile.properties`:
 ```properties
 toggleKey=GRAVE_ACCENT
 align=CENTER
-modes=Native:1.0x1.0, Thin:0.2x1.0, Eye Measure:0.1x1.0, Wide Short:1.0x0.45
+modes=Native:1.0x1.0, Thin:0.14x1.0, Eye Measure:0.08x1.0, Wide Short:1.0x0.25
 ```
 
 - `toggleKey` — the key that cycles modes. Accepts a **GLFW key name**
@@ -57,8 +57,11 @@ modes=Native:1.0x1.0, Thin:0.2x1.0, Eye Measure:0.1x1.0, Wide Short:1.0x0.45
 - `align` — `CENTER` (default), `LEFT` or `RIGHT`: where the rendered strip sits
   on the real screen. `LEFT` is what GL does unaided, since its viewport origin
   is the bottom-left corner.
-- `modes` — `Name:WidthFractionxHeightFraction`, as **fractions of the device's
-  native surface**, 0.01–1.0.
+- `modes` — `Name:WidthxHeight`. Each dimension is either a **fraction** of the
+  native surface or an **absolute pixel count**, decided by magnitude: `1.0` or
+  less is a fraction, anything larger is pixels. So `Thin:0.14x1.0` is 14% of
+  the width at full height, while `Thin:280x1024` is exactly 280×1024 — the form
+  Toolscreen presets are written in, so one can be copied over unchanged.
 
 The default is `` ` `` rather than a function key, because plenty of tablet and
 compact keyboards have no F-row at all. Other keys unbound in vanilla 1.16.1 and
@@ -70,10 +73,18 @@ The name table is generated directly from Amethyst's own
 delivers — including its `DPAD_*` naming for the arrow keys, aliased to the
 standard `UP` / `DOWN` / `LEFT` / `RIGHT` here.
 
-Fractions rather than Toolscreen's absolute `game_width`/`game_height` because a
-desktop monitor is a fixed known size, while the same config here has to survive
-an iPhone, an iPad and an external display. Resolved values are forced even, to
-match the launcher's own rounding.
+Both forms exist because they answer different needs. Fractions survive an
+iPhone, an iPad and an external display, which fixed pixels cannot. Absolute
+pixels let a Toolscreen preset be reproduced exactly — that tool stores
+`game_width`/`game_height` against a monitor of known fixed size, so its
+published dimensions are only meaningful as pixels. Resolved values are clamped
+to the real surface and forced even, matching the launcher's own rounding.
+
+The default ratios are estimated from screenshots of the Windows tool — roughly
+**1:5** for thin and **5.8:1** for wide, both far more extreme than the first
+guesses (1:3.5 and 3.2:1). They are an approximation of its look, not a copy of
+its numbers; for an exact match, read the dimensions out of Toolscreen's Modes
+tab and enter them as pixels.
 
 It is editable **on-device**, deliberately: rebuilding needs a computer, and
 tuning mode dimensions without a rebuild is the difference between a usable
