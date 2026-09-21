@@ -9,6 +9,7 @@
   "client": [
     "FramebufferMixin",
     "GameRendererMixin",
+    "InGameHudMixin",
     "MinecraftClientMixin",
     "WindowMixin"
   ]

@@ -82,11 +82,15 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile int eyeZoomRegionHeight = 6;
     private static volatile int eyeZoomFactor = 10;
     private static volatile int eyeZoomRulerMax = 6;
-    private static volatile double eyeZoomTop = 0.12;
+    // Just below the crosshair rather than up in the sky: close enough to read
+    // without moving your eye far, clear of the centre region being sampled.
+    private static volatile double eyeZoomTop = 0.62;
+    private static volatile double eyeZoomLeft = 0.5;
     private static volatile boolean eyeZoomReported;
     private static volatile boolean overlayHookReported;
     private static volatile boolean crosshairEnabled = true;
-    private static volatile int crosshairSize = 4;
+    private static volatile int crosshairSize = 3;
+    private static volatile int crosshairGap = 2;
 
     /** Where the rendered area sits within the real screen. */
     public enum Align { LEFT, CENTER, RIGHT }
@@ -133,6 +137,11 @@ public final class ToolscreenMobile implements ClientModInitializer {
         return crosshairSize;
     }
 
+    /** Half-width of the gap left at the crosshair's centre, in GUI units. */
+    public static int crosshairGap() {
+        return crosshairGap;
+    }
+
     public static int eyeZoomRegionWidth() {
         return eyeZoomRegionWidth;
     }
@@ -149,9 +158,14 @@ public final class ToolscreenMobile implements ClientModInitializer {
         return eyeZoomRulerMax;
     }
 
-    /** Vertical position of the panel, as a fraction of the strip's height. */
+    /** Centre of the panel vertically, as a fraction of the strip's height. */
     public static double eyeZoomTop() {
         return eyeZoomTop;
+    }
+
+    /** Centre of the panel horizontally, as a fraction of the strip's width. */
+    public static double eyeZoomLeft() {
+        return eyeZoomLeft;
     }
 
     /**
@@ -275,13 +289,15 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
         crosshairEnabled = !"false".equalsIgnoreCase(String.valueOf(props.getProperty("crosshair")).trim());
         crosshairSize = clampInt(props.getProperty("crosshairSize"), crosshairSize, 1, 64);
+        crosshairGap = clampInt(props.getProperty("crosshairGap"), crosshairGap, 0, 32);
 
         eyeZoomModes = parseNameList(props.getProperty("eyezoomModes"), eyeZoomModes);
         eyeZoomRegionWidth = clampInt(props.getProperty("eyezoomRegionWidth"), eyeZoomRegionWidth, 2, 256);
         eyeZoomRegionHeight = clampInt(props.getProperty("eyezoomRegionHeight"), eyeZoomRegionHeight, 2, 256);
         eyeZoomFactor = clampInt(props.getProperty("eyezoomFactor"), eyeZoomFactor, 1, 64);
         eyeZoomRulerMax = clampInt(props.getProperty("eyezoomRulerMax"), eyeZoomRulerMax, 1, 128);
-        eyeZoomTop = clampDouble(props.getProperty("eyezoomTop"), eyeZoomTop, 0.0, 0.95);
+        eyeZoomTop = clampDouble(props.getProperty("eyezoomTop"), eyeZoomTop, 0.0, 1.0);
+        eyeZoomLeft = clampDouble(props.getProperty("eyezoomLeft"), eyeZoomLeft, 0.0, 1.0);
 
         List<Mode> parsed = parseModes(props.getProperty("modes"));
         if (!parsed.isEmpty()) {
@@ -368,12 +384,14 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("modes", modeList.toString());
         props.setProperty("crosshair", Boolean.toString(crosshairEnabled));
         props.setProperty("crosshairSize", Integer.toString(crosshairSize));
+        props.setProperty("crosshairGap", Integer.toString(crosshairGap));
         props.setProperty("eyezoomModes", String.join(", ", eyeZoomModes));
         props.setProperty("eyezoomRegionWidth", Integer.toString(eyeZoomRegionWidth));
         props.setProperty("eyezoomRegionHeight", Integer.toString(eyeZoomRegionHeight));
         props.setProperty("eyezoomFactor", Integer.toString(eyeZoomFactor));
         props.setProperty("eyezoomRulerMax", Integer.toString(eyeZoomRulerMax));
         props.setProperty("eyezoomTop", Double.toString(eyeZoomTop));
+        props.setProperty("eyezoomLeft", Double.toString(eyeZoomLeft));
 
         try {
             Files.createDirectories(file.getParent());

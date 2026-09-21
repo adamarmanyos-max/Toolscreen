@@ -62,34 +62,42 @@ public final class EyeZoom {
         Window window = client.getWindow();
         if (window == null) return;
 
-        // Drawn whenever a mode is active, not only for EyeZoom: hiding the HUD
-        // takes the game's own crosshair with it, and a stretched screen is
-        // useless for aiming without one.
-        if (ToolscreenMobile.crosshairEnabled() && ToolscreenMobile.isOverrideActive()) {
-            drawCrosshair(matrices, window);
+        boolean overrideActive = ToolscreenMobile.isOverrideActive();
+
+        // Order matters. The pixels are read before anything of ours is drawn,
+        // because the sample is taken at the centre of the screen and our own
+        // crosshair sits exactly there: draw first and the magnifier shows a
+        // giant crosshair rather than the target.
+        if (ToolscreenMobile.eyeZoomActive()) {
+            int fbWidth = window.getFramebufferWidth();
+            int fbHeight = window.getFramebufferHeight();
+            int regionW = Math.min(ToolscreenMobile.eyeZoomRegionWidth(), fbWidth);
+            int regionH = Math.min(ToolscreenMobile.eyeZoomRegionHeight(), fbHeight);
+
+            if (regionW >= 2 && regionH >= 2) {
+                int[] pixels = readRegion(fbWidth, fbHeight, regionW, regionH);
+                if (pixels != null) {
+                    ToolscreenMobile.noteEyeZoomActive();
+
+                    int zoom = ToolscreenMobile.eyeZoomFactor();
+                    int panelW = regionW * zoom;
+                    int panelH = regionH * zoom;
+                    int panelX = (int) (window.getScaledWidth() * ToolscreenMobile.eyeZoomLeft()) - panelW / 2;
+                    int panelY = (int) (window.getScaledHeight() * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
+
+                    drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoom);
+                    drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoom);
+                    drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoom);
+                }
+            }
         }
 
-        if (!ToolscreenMobile.eyeZoomActive()) return;
-
-        int fbWidth = window.getFramebufferWidth();
-        int fbHeight = window.getFramebufferHeight();
-        int regionW = Math.min(ToolscreenMobile.eyeZoomRegionWidth(), fbWidth);
-        int regionH = Math.min(ToolscreenMobile.eyeZoomRegionHeight(), fbHeight);
-        if (regionW < 2 || regionH < 2) return;
-
-        int[] pixels = readRegion(fbWidth, fbHeight, regionW, regionH);
-        if (pixels == null) return;
-        ToolscreenMobile.noteEyeZoomActive();
-
-        int zoom = ToolscreenMobile.eyeZoomFactor();
-        int panelW = regionW * zoom;
-        int panelH = regionH * zoom;
-        int panelX = (window.getScaledWidth() - panelW) / 2;
-        int panelY = (int) (window.getScaledHeight() * ToolscreenMobile.eyeZoomTop());
-
-        drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoom);
-        drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoom);
-        drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoom);
+        // Drawn last, and only after sampling. Hiding the HUD takes the game's
+        // own crosshair with it, and a stretched screen is useless for aiming
+        // without one.
+        if (ToolscreenMobile.crosshairEnabled() && overrideActive) {
+            drawCrosshair(matrices, window);
+        }
     }
 
     /**
@@ -186,9 +194,16 @@ public final class EyeZoom {
         int cx = window.getScaledWidth() / 2;
         int cy = window.getScaledHeight() / 2;
         int arm = ToolscreenMobile.crosshairSize();
+        int gap = ToolscreenMobile.crosshairGap();
         int colour = 0xFFFFFFFF;
-        DrawableHelper.fill(matrices, cx - arm, cy, cx + arm + 1, cy + 1, colour);
-        DrawableHelper.fill(matrices, cx, cy - arm, cx + 1, cy + arm + 1, colour);
+
+        // Four separate arms with a gap at the centre, rather than a solid
+        // plus. The gap leaves the exact pixel being measured visible, which a
+        // filled centre would cover - and that pixel is the whole point.
+        DrawableHelper.fill(matrices, cx - gap - arm, cy, cx - gap, cy + 1, colour);
+        DrawableHelper.fill(matrices, cx + gap + 1, cy, cx + gap + 1 + arm, cy + 1, colour);
+        DrawableHelper.fill(matrices, cx, cy - gap - arm, cx + 1, cy - gap, colour);
+        DrawableHelper.fill(matrices, cx, cy + gap + 1, cx + 1, cy + gap + 1 + arm, colour);
     }
 
     /** The reference axis: the boundary between the two centre pixels. */
