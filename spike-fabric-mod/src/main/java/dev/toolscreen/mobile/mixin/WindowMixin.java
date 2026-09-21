@@ -41,6 +41,9 @@ public abstract class WindowMixin {
     @Shadow private int framebufferWidth;
     @Shadow private int framebufferHeight;
 
+    /** GUI units per framebuffer pixel, as chosen by Minecraft's auto scaling. */
+    @Shadow private double scaleFactor;
+
     @Inject(method = "getFramebufferWidth", at = @At("HEAD"), cancellable = true)
     private void toolscreen$overrideFramebufferWidth(CallbackInfoReturnable<Integer> cir) {
         // Recorded unconditionally: once the getters start lying, this is the
@@ -58,5 +61,32 @@ public abstract class WindowMixin {
         if (!ToolscreenMobile.isOverrideActive()) return;
         Mode mode = ToolscreenMobile.activeMode();
         cir.setReturnValue(mode.resolveHeight(this.framebufferHeight));
+    }
+
+    // ---- GUI coordinate space ---------------------------------------------
+    //
+    // Overriding the framebuffer getters alone is not enough. Minecraft caches
+    // scaledWidth/scaledHeight, computing them from the *private fields* rather
+    // than through the getters above, so the GUI stays laid out for the whole
+    // surface while the game renders into a narrow strip. Everything positioned
+    // from the centre of that space - the crosshair, the hotbar, this mod's own
+    // overlay - then lands outside the strip entirely and is never seen.
+    //
+    // Reporting the scaled size of the strip instead puts the GUI back inside
+    // the rendered area. Where the cached value already matched, this computes
+    // the same number, so it is safe either way.
+
+    @Inject(method = "getScaledWidth", at = @At("HEAD"), cancellable = true)
+    private void toolscreen$overrideScaledWidth(CallbackInfoReturnable<Integer> cir) {
+        if (!ToolscreenMobile.isOverrideActive() || this.scaleFactor <= 0) return;
+        int width = ToolscreenMobile.activeMode().resolveWidth(this.framebufferWidth);
+        cir.setReturnValue((int) Math.ceil(width / this.scaleFactor));
+    }
+
+    @Inject(method = "getScaledHeight", at = @At("HEAD"), cancellable = true)
+    private void toolscreen$overrideScaledHeight(CallbackInfoReturnable<Integer> cir) {
+        if (!ToolscreenMobile.isOverrideActive() || this.scaleFactor <= 0) return;
+        int height = ToolscreenMobile.activeMode().resolveHeight(this.framebufferHeight);
+        cir.setReturnValue((int) Math.ceil(height / this.scaleFactor));
     }
 }
