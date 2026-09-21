@@ -84,8 +84,25 @@ public abstract class FramebufferMixin {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.getWindow() == null) return;
         if (width != client.getWindow().getFramebufferWidth()) return;
-        EyeZoom.renderBackground(lastBlitX, lastBlitY, lastBlitW, lastBlitH);
         EyeZoom.renderSide(client.textRenderer, lastBlitX, lastBlitY, lastBlitW, lastBlitH);
+    }
+
+    /**
+     * Paints the background across the surface, before the strip is blitted
+     * over it.
+     *
+     * <p>HEAD rather than TAIL, deliberately. Filling afterwards means the fill
+     * must agree exactly with where the strip landed, and a wrong number hides
+     * the game. Filling underneath cannot: whatever this paints, the blit
+     * covers the middle of it a moment later.
+     */
+    @Inject(method = "drawInternal(IIZ)V", at = @At("HEAD"), require = 0)
+    private void toolscreen$drawBackground(int width, int height, boolean bl, CallbackInfo ci) {
+        if (!ToolscreenMobile.isOverrideActive()) return;
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.getWindow() == null) return;
+        if (width != client.getWindow().getFramebufferWidth()) return;
+        EyeZoom.renderBackground(lastBlitX, lastBlitY, lastBlitW, lastBlitH);
     }
 
     @Unique private int lastBlitX;

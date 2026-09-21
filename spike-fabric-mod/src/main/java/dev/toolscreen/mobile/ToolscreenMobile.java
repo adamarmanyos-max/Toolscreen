@@ -96,10 +96,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
     // The original fills the area around the game rather than leaving it bare;
     // its localization table carries background, bg_image_path and color_stops.
-    // Off by default: the first attempt painted over the game itself. Until
-    // the geometry below is confirmed against a real device, bare black is the
-    // safe state - an ugly letterbox beats an invisible game.
-    private static volatile boolean backgroundEnabled = false;
+    private static volatile boolean backgroundEnabled = true;
     private static volatile int backgroundTop = 0x1A0533;
     private static volatile int backgroundBottom = 0x4A1594;
     private static volatile boolean eyeZoomReported;

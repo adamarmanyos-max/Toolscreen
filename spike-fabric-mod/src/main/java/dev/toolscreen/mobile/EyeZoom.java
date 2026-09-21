@@ -293,45 +293,25 @@ public final class EyeZoom {
         if (!ToolscreenMobile.backgroundEnabled()) return;
         if (realW < 2 || realH < 2) return;
 
-        // Refuse to paint if the blit does not sit inside the surface. If those
-        // two disagree the bands are meaningless and would cover the game,
-        // which is exactly what happened the first time.
-        if (blitW <= 0 || blitH <= 0 || blitX < 0 || blitY < 0
-                || blitX + blitW > realW || blitY + blitH > realH) {
-            return;
-        }
+        final int from = ToolscreenMobile.backgroundTop();
+        final int to = ToolscreenMobile.backgroundBottom();
+        final int w = realW;
+        final int h = realH;
 
-        // The blit rectangle is in GL coordinates, whose origin is bottom-left;
-        // everything drawn here is in the top-left origin the ortho sets up.
-        int left = blitX;
-        int right = blitX + blitW;
-        int top = realH - (blitY + blitH);
-        int bottom = realH - blitY;
-
+        // Painted across the whole surface, before Minecraft blits the strip
+        // over the top of it. The first attempt filled only the four bands
+        // around the strip, which meant the fill had to agree exactly with the
+        // blit's position and the surface size - get either wrong and it covers
+        // the game, which is what happened. Painting underneath cannot: the
+        // strip is drawn afterwards, so the worst a wrong number can do here is
+        // leave a band unpainted.
         withFullSurface(blitX, blitY, blitW, blitH, () -> {
             MatrixStack matrices = new MatrixStack();
-            int from = ToolscreenMobile.backgroundTop();
-            int to = ToolscreenMobile.backgroundBottom();
-
-            // A gradient in horizontal bands. DrawableHelper's own gradient
-            // helper is not public, and bands are cheap enough at this count
-            // that reaching for anything cleverer would not pay for itself.
             int bands = 48;
             for (int i = 0; i < bands; i++) {
-                int y0 = realH * i / bands;
-                int y1 = realH * (i + 1) / bands;
-                int colour = lerpColour(from, to, i / (float) (bands - 1));
-
-                if (y1 <= top || y0 >= bottom) {
-                    DrawableHelper.fill(matrices, 0, y0, realW, y1, colour);
-                } else {
-                    int bandTop = Math.max(y0, top);
-                    int bandBottom = Math.min(y1, bottom);
-                    if (y0 < top) DrawableHelper.fill(matrices, 0, y0, realW, top, colour);
-                    if (y1 > bottom) DrawableHelper.fill(matrices, 0, bottom, realW, y1, colour);
-                    if (left > 0) DrawableHelper.fill(matrices, 0, bandTop, left, bandBottom, colour);
-                    if (right < realW) DrawableHelper.fill(matrices, right, bandTop, realW, bandBottom, colour);
-                }
+                int y0 = h * i / bands;
+                int y1 = h * (i + 1) / bands;
+                DrawableHelper.fill(matrices, 0, y0, w, y1, lerpColour(from, to, i / (float) (bands - 1)));
             }
         });
     }
@@ -361,7 +341,6 @@ public final class EyeZoom {
         GlStateManager.loadIdentity();
         GlStateManager.translatef(0.0F, 0.0F, -2000.0F);
         GlStateManager.viewport(0, 0, realW, realH);
-        GlStateManager.enableBlend();
 
         try {
             body.run();
