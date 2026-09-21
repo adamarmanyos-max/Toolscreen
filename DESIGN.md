@@ -160,7 +160,7 @@ identical between them so a Route C config imports into Route A later.
 | Thin / stretched / tall presets | **Direct** | Renders into a sub-rect; remainder letterboxed black. |
 | Mode hotkey switching | **Redesign** | iOS has no global hotkeys → bind to Amethyst's existing on-screen controls, hardware keyboard, or controller. |
 | `Go Borderless` / `Auto-Borderless` | **N/A** | iOS apps are always fullscreen. Repurpose as "restore native aspect". |
-| **EyeZoom** (magnified clone + overlay) | **Port (A/B)** | Framebuffer blit; Metal or GL on a layer we own. Hardest visual feature. |
+| **EyeZoom** (magnified clone + overlay) | **Port (A/B)** | Framebuffer blit; Metal or GL on a layer we own. Hardest visual feature, and the most valuable one for practising eye throws — but out of reach for Route C, so it is the main reason to move to Route A. |
 | **Mirrors** (capture zones, colour match) | **Port (A/B)** | Same machinery as EyeZoom; build second. |
 | Browser overlays (WebView2) | **Swap** | WebView2 → `WKWebView`. Route A/B only. |
 | Image overlays, cursor trail | **Port (A/B)** | Native overlay views — easier than the ImGui original. |
@@ -200,10 +200,10 @@ Things the Windows tool *cannot* do, which fall out of this architecture for fre
   GLFW-era. MCSR's 1.16.1 is well within Amethyst's supported range.
 - **Upstream drift.** Routes A and B both couple to launcher internals
   (`updateSavedResolution` is a private method). Budget for rebases.
-- **Leaderboard legality.** Which tools are legal, and whether mobile runs are
-  accepted at all, is a speedrun.com / MCSR community rules question — worth
-  confirming before investing weeks, since it determines whether EyeZoom and
-  Mirrors are worth porting at all or whether Modes alone is the deliverable.
+- **Leaderboard rules do not constrain this.** These runs are not being
+  submitted, so no speedrun.com / MCSR tool policy applies and feature scope is
+  decided purely by usefulness. (If that ever changes, check the rules for the
+  relevant category first — several features here would need re-examining.)
 
 ---
 
