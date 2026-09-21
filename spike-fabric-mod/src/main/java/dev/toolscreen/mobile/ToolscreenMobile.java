@@ -51,12 +51,58 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile List<Mode> modes = DEFAULT_MODES;
     private static volatile int activeIndex = 0;
     private static volatile int toggleKey = DEFAULT_TOGGLE_KEY;
+    private static volatile Align align = Align.CENTER;
+
+    /**
+     * The real surface size, recorded by {@code WindowMixin} as it reads the
+     * shadowed fields. Needed to work out how far to offset the rendered strip:
+     * the overridden getters report the fake size, so the true size is not
+     * otherwise reachable from here.
+     */
+    private static volatile int nativeWidth;
+    private static volatile int nativeHeight;
+
+    /** Where the rendered area sits within the real screen. */
+    public enum Align { LEFT, CENTER, RIGHT }
 
     @Override
     public void onInitializeClient() {
         loadConfig();
         LOGGER.info("[{}] ready: {} mode(s), toggle key {} ({})",
                 MOD_ID, modes.size(), KeyCodes.nameOf(toggleKey, "?"), toggleKey);
+    }
+
+    public static void recordNativeSize(int width, int height) {
+        nativeWidth = width;
+        nativeHeight = height;
+    }
+
+    /**
+     * Horizontal offset, in pixels, for the final blit.
+     *
+     * <p>Minecraft blits its render target with {@code viewport(0, 0, w, h)},
+     * and GL's origin is bottom-left, so a smaller-than-screen viewport lands in
+     * the corner. Shifting it by this much centres the strip instead.
+     */
+    public static int offsetX() {
+        if (!isOverrideActive()) return 0;
+        return offset(nativeWidth, activeMode().resolveWidth(nativeWidth));
+    }
+
+    /** Vertical offset for the final blit; matters for modes shorter than the screen. */
+    public static int offsetY() {
+        if (!isOverrideActive()) return 0;
+        return offset(nativeHeight, activeMode().resolveHeight(nativeHeight));
+    }
+
+    private static int offset(int real, int shown) {
+        int slack = real - shown;
+        if (slack <= 0) return 0;
+        switch (align) {
+            case CENTER: return slack / 2;
+            case RIGHT: return slack;
+            default: return 0;
+        }
     }
 
     public static Mode activeMode() {
@@ -112,10 +158,21 @@ public final class ToolscreenMobile implements ClientModInitializer {
         }
 
         toggleKey = KeyCodes.resolve(props.getProperty("toggleKey"), DEFAULT_TOGGLE_KEY);
+        align = parseAlign(props.getProperty("align"), Align.CENTER);
 
         List<Mode> parsed = parseModes(props.getProperty("modes"));
         if (!parsed.isEmpty()) {
             modes = List.copyOf(parsed);
+        }
+    }
+
+    private static Align parseAlign(String raw, Align fallback) {
+        if (raw == null) return fallback;
+        try {
+            return Align.valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            LOGGER.warn("[{}] unknown align '{}', using {}", MOD_ID, raw.trim(), fallback);
+            return fallback;
         }
     }
 
@@ -154,6 +211,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
         Properties props = new Properties();
         props.setProperty("toggleKey", KeyCodes.nameOf(DEFAULT_TOGGLE_KEY, Integer.toString(DEFAULT_TOGGLE_KEY)));
+        props.setProperty("align", Align.CENTER.name());
         props.setProperty("modes", modeList.toString());
 
         try {
@@ -162,6 +220,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
                 props.store(out, "Toolscreen mobile (spike). "
                         + "toggleKey = the key that cycles modes: a GLFW key name such as "
                         + "GRAVE_ACCENT, BACKSLASH, RIGHT_BRACKET or G, or a raw numeric code. "
+                        + "align = LEFT, CENTER or RIGHT: where the rendered area sits on screen. "
                         + "modes = comma separated Name:WidthFractionxHeightFraction, "
                         + "fractions of the native surface, 0.01 to 1.0.");
             }

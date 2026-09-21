@@ -45,6 +45,7 @@ First launch writes `config/toolscreen-mobile.properties`:
 
 ```properties
 toggleKey=GRAVE_ACCENT
+align=CENTER
 modes=Native:1.0x1.0, Thin:0.2x1.0, Eye Measure:0.1x1.0, Wide Short:1.0x0.45
 ```
 
@@ -53,6 +54,9 @@ modes=Native:1.0x1.0, Thin:0.2x1.0, Eye Measure:0.1x1.0, Wide Short:1.0x0.45
   code. Case, surrounding spaces and a `GLFW_KEY_` prefix are all tolerated.
   Amethyst's on-screen buttons emit the same codes, so one setting covers both a
   physical key and a touch button.
+- `align` — `CENTER` (default), `LEFT` or `RIGHT`: where the rendered strip sits
+  on the real screen. `LEFT` is what GL does unaided, since its viewport origin
+  is the bottom-left corner.
 - `modes` — `Name:WidthFractionxHeightFraction`, as **fractions of the device's
   native surface**, 0.01–1.0.
 

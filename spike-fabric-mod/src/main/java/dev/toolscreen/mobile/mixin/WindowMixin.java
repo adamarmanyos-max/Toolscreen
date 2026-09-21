@@ -43,6 +43,10 @@ public abstract class WindowMixin {
 
     @Inject(method = "getFramebufferWidth", at = @At("HEAD"), cancellable = true)
     private void toolscreen$overrideFramebufferWidth(CallbackInfoReturnable<Integer> cir) {
+        // Recorded unconditionally: once the getters start lying, this is the
+        // only place the real surface size is still visible, and FramebufferMixin
+        // needs it to work out the centring offset.
+        ToolscreenMobile.recordNativeSize(this.framebufferWidth, this.framebufferHeight);
         if (!ToolscreenMobile.isOverrideActive()) return;
         Mode mode = ToolscreenMobile.activeMode();
         cir.setReturnValue(mode.resolveWidth(this.framebufferWidth));
@@ -50,6 +54,7 @@ public abstract class WindowMixin {
 
     @Inject(method = "getFramebufferHeight", at = @At("HEAD"), cancellable = true)
     private void toolscreen$overrideFramebufferHeight(CallbackInfoReturnable<Integer> cir) {
+        ToolscreenMobile.recordNativeSize(this.framebufferWidth, this.framebufferHeight);
         if (!ToolscreenMobile.isOverrideActive()) return;
         Mode mode = ToolscreenMobile.activeMode();
         cir.setReturnValue(mode.resolveHeight(this.framebufferHeight));
