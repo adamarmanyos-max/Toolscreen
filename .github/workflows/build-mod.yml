@@ -41,7 +41,7 @@ jobs:
         working-directory: spike-fabric-mod
         run: |
           set -eux
-          for jar in $(find ~/.gradle/caches -name "*.jar" 2>/dev/null | grep -iE "minecraft.*(named|mapped)" | head -20); do
+          for jar in $(find ~/.gradle/caches -name "*.jar" 2>/dev/null | grep -i minecraft | head -20); do
             if javap -p -cp "$jar" net.minecraft.client.gl.Framebuffer >/dev/null 2>&1; then
               echo "=== FOUND IN: $jar ==="
               javap -p -cp "$jar" net.minecraft.client.gl.Framebuffer
