@@ -13,6 +13,11 @@ on:
     paths:
       - 'spike-fabric-mod/**'
   workflow_dispatch:
+    inputs:
+      classes:
+        description: "Space-separated fully-qualified classes to dump signatures for"
+        required: false
+        type: string
 
 jobs:
   build:
@@ -33,22 +38,32 @@ jobs:
         working-directory: spike-fabric-mod
         run: ./gradlew build --stacktrace --no-daemon
 
-      # Temporary diagnostic: find which method actually contains the
-      # RenderSystem.viewport call, by disassembling rather than guessing.
-      - name: Locate viewport call
-        if: github.event_name == 'workflow_dispatch' 
+      # Signature dump. The Mixin annotation processor only warns on selectors
+      # it cannot map, so a wrong target compiles cleanly and fails at runtime.
+      # Reading the real signatures out of the remapped jar is the only way to
+      # be sure before shipping a mixin to a device.
+      - name: Dump signatures
+        if: github.event_name == 'workflow_dispatch'
         working-directory: spike-fabric-mod
+        env:
+          CLASSES: ${{ inputs.classes }}
         run: |
           set -eu
+          LIST="${CLASSES:-}"
+          if [ -z "$LIST" ]; then
+            LIST="net.minecraft.client.gui.hud.InGameHud net.minecraft.client.gui.DrawableHelper net.minecraft.client.font.TextRenderer net.minecraft.client.util.Window"
+          fi
+          JAR=""
           for jar in $(find ~/.gradle/caches -name "*.jar" 2>/dev/null | grep -i minecraft | head -20); do
-            if javap -p -cp "$jar" net.minecraft.client.gl.Framebuffer >/dev/null 2>&1; then
-              javap -c -p -cp "$jar" net.minecraft.client.gl.Framebuffer > /tmp/fb.txt
-              echo "=== method boundaries and viewport calls ==="
-              grep -nE "^  [a-z].*\(|viewport|glViewport" /tmp/fb.txt
-              exit 0
-            fi
+            if javap -p -cp "$jar" net.minecraft.client.util.Window >/dev/null 2>&1; then JAR="$jar"; break; fi
           done
-          echo "jar not found"
+          if [ -z "$JAR" ]; then echo "remapped jar not found"; exit 1; fi
+          echo "JAR: $JAR"
+          for c in $LIST; do
+            echo ""
+            echo "================ $c ================"
+            javap -p -cp "$JAR" "$c" 2>&1 | head -80
+          done
 
       # Uploaded even on failure: a failed run still tells us which yarn names
       # were wrong, which is the whole point of this workflow right now.
