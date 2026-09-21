@@ -58,10 +58,18 @@ public final class EyeZoom {
      */
     public static void render(MatrixStack matrices, MinecraftClient client, TextRenderer font) {
         ToolscreenMobile.noteOverlayHookFired();
-        if (!ToolscreenMobile.eyeZoomActive()) return;
 
         Window window = client.getWindow();
         if (window == null) return;
+
+        // Drawn whenever a mode is active, not only for EyeZoom: hiding the HUD
+        // takes the game's own crosshair with it, and a stretched screen is
+        // useless for aiming without one.
+        if (ToolscreenMobile.crosshairEnabled() && ToolscreenMobile.isOverrideActive()) {
+            drawCrosshair(matrices, window);
+        }
+
+        if (!ToolscreenMobile.eyeZoomActive()) return;
 
         int fbWidth = window.getFramebufferWidth();
         int fbHeight = window.getFramebufferHeight();
@@ -165,6 +173,22 @@ public final class EyeZoom {
                     0xFF000000);
             matrices.pop();
         }
+    }
+
+    /**
+     * A replacement for the vanilla crosshair, which is lost with the HUD.
+     *
+     * <p>Deliberately a thin plain cross rather than a copy of the vanilla
+     * texture: this one marks the exact centre pixel, which is the reference
+     * the ruler counts from.
+     */
+    private static void drawCrosshair(MatrixStack matrices, Window window) {
+        int cx = window.getScaledWidth() / 2;
+        int cy = window.getScaledHeight() / 2;
+        int arm = ToolscreenMobile.crosshairSize();
+        int colour = 0xFFFFFFFF;
+        DrawableHelper.fill(matrices, cx - arm, cy, cx + arm + 1, cy + 1, colour);
+        DrawableHelper.fill(matrices, cx, cy - arm, cx + 1, cy + arm + 1, colour);
     }
 
     /** The reference axis: the boundary between the two centre pixels. */

@@ -85,6 +85,8 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile double eyeZoomTop = 0.12;
     private static volatile boolean eyeZoomReported;
     private static volatile boolean overlayHookReported;
+    private static volatile boolean crosshairEnabled = true;
+    private static volatile int crosshairSize = 4;
 
     /** Where the rendered area sits within the real screen. */
     public enum Align { LEFT, CENTER, RIGHT }
@@ -120,6 +122,15 @@ public final class ToolscreenMobile implements ClientModInitializer {
             if (name.equalsIgnoreCase(active)) return true;
         }
         return false;
+    }
+
+    public static boolean crosshairEnabled() {
+        return crosshairEnabled;
+    }
+
+    /** Arm length of the replacement crosshair, in GUI units. */
+    public static int crosshairSize() {
+        return crosshairSize;
     }
 
     public static int eyeZoomRegionWidth() {
@@ -262,6 +273,9 @@ public final class ToolscreenMobile implements ClientModInitializer {
         toggleKey = KeyCodes.resolve(props.getProperty("toggleKey"), DEFAULT_TOGGLE_KEY);
         align = parseAlign(props.getProperty("align"), Align.CENTER);
 
+        crosshairEnabled = !"false".equalsIgnoreCase(String.valueOf(props.getProperty("crosshair")).trim());
+        crosshairSize = clampInt(props.getProperty("crosshairSize"), crosshairSize, 1, 64);
+
         eyeZoomModes = parseNameList(props.getProperty("eyezoomModes"), eyeZoomModes);
         eyeZoomRegionWidth = clampInt(props.getProperty("eyezoomRegionWidth"), eyeZoomRegionWidth, 2, 256);
         eyeZoomRegionHeight = clampInt(props.getProperty("eyezoomRegionHeight"), eyeZoomRegionHeight, 2, 256);
@@ -352,6 +366,8 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("toggleKey", KeyCodes.nameOf(DEFAULT_TOGGLE_KEY, Integer.toString(DEFAULT_TOGGLE_KEY)));
         props.setProperty("align", Align.CENTER.name());
         props.setProperty("modes", modeList.toString());
+        props.setProperty("crosshair", Boolean.toString(crosshairEnabled));
+        props.setProperty("crosshairSize", Integer.toString(crosshairSize));
         props.setProperty("eyezoomModes", String.join(", ", eyeZoomModes));
         props.setProperty("eyezoomRegionWidth", Integer.toString(eyeZoomRegionWidth));
         props.setProperty("eyezoomRegionHeight", Integer.toString(eyeZoomRegionHeight));
