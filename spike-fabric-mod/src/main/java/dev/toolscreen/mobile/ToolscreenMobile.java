@@ -72,6 +72,23 @@ public final class ToolscreenMobile implements ClientModInitializer {
                 MOD_ID, modes.size(), KeyCodes.nameOf(toggleKey, "?"), toggleKey);
     }
 
+    private static volatile boolean centeringReported;
+
+    /**
+     * Called by {@code FramebufferMixin} the first time it actually runs.
+     *
+     * <p>The centring redirect is optional ({@code require = 0}), so if its
+     * target ever stops matching the game still launches and simply renders
+     * left-aligned. That trade means silence is ambiguous, so this logs once to
+     * make "the redirect attached" observable in latest.log instead of
+     * something you have to infer from pixels.
+     */
+    public static void noteCenteringActive() {
+        if (centeringReported) return;
+        centeringReported = true;
+        LOGGER.info("[{}] centring active (align={})", MOD_ID, align);
+    }
+
     public static void recordNativeSize(int width, int height) {
         nativeWidth = width;
         nativeHeight = height;

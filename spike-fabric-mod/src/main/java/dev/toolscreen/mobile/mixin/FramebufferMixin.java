@@ -39,12 +39,21 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 @Mixin(Framebuffer.class)
 public abstract class FramebufferMixin {
 
+    /**
+     * {@code require = 0} deliberately: centring is cosmetic, and a mismatched
+     * target here previously crashed the game on load. Mixin aborts startup
+     * when a required injector finds no target, which is the right behaviour
+     * for the core size override but far too harsh for positioning. If this
+     * ever stops matching, the game launches and renders left-aligned instead.
+     */
     @Redirect(
             method = "drawInternal(IIZ)V",
             at = @At(
                     value = "INVOKE",
-                    target = "Lcom/mojang/blaze3d/platform/GlStateManager;viewport(IIII)V"))
+                    target = "Lcom/mojang/blaze3d/platform/GlStateManager;viewport(IIII)V"),
+            require = 0)
     private void toolscreen$offsetBlitViewport(int x, int y, int width, int height) {
+        ToolscreenMobile.noteCenteringActive();
         GlStateManager.viewport(x + ToolscreenMobile.offsetX(), y + ToolscreenMobile.offsetY(), width, height);
     }
 }
