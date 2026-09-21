@@ -86,6 +86,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
     // without moving your eye far, clear of the centre region being sampled.
     private static volatile double eyeZoomTop = 0.62;
     private static volatile double eyeZoomLeft = 0.5;
+    private static volatile boolean eyeZoomSide = true;
     private static volatile boolean eyeZoomReported;
     private static volatile boolean overlayHookReported;
     private static volatile boolean crosshairEnabled = true;
@@ -199,6 +200,24 @@ public final class ToolscreenMobile implements ClientModInitializer {
                 MOD_ID, eyeZoomRegionWidth, eyeZoomRegionHeight, eyeZoomFactor, eyeZoomRulerMax);
     }
 
+    /** Real surface width, before any mode override. */
+    public static int nativeWidth() {
+        return nativeWidth;
+    }
+
+    /** Real surface height, before any mode override. */
+    public static int nativeHeight() {
+        return nativeHeight;
+    }
+
+    /**
+     * True to draw the panel in the letterboxed area beside the strip, where
+     * the Windows tool puts it, rather than over the game.
+     */
+    public static boolean eyeZoomSide() {
+        return eyeZoomSide;
+    }
+
     public static void recordNativeSize(int width, int height) {
         nativeWidth = width;
         nativeHeight = height;
@@ -298,6 +317,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         eyeZoomRulerMax = clampInt(props.getProperty("eyezoomRulerMax"), eyeZoomRulerMax, 1, 128);
         eyeZoomTop = clampDouble(props.getProperty("eyezoomTop"), eyeZoomTop, 0.0, 1.0);
         eyeZoomLeft = clampDouble(props.getProperty("eyezoomLeft"), eyeZoomLeft, 0.0, 1.0);
+        eyeZoomSide = !"false".equalsIgnoreCase(String.valueOf(props.getProperty("eyezoomSide")).trim());
 
         List<Mode> parsed = parseModes(props.getProperty("modes"));
         if (!parsed.isEmpty()) {
@@ -392,6 +412,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("eyezoomRulerMax", Integer.toString(eyeZoomRulerMax));
         props.setProperty("eyezoomTop", Double.toString(eyeZoomTop));
         props.setProperty("eyezoomLeft", Double.toString(eyeZoomLeft));
+        props.setProperty("eyezoomSide", Boolean.toString(eyeZoomSide));
 
         try {
             Files.createDirectories(file.getParent());

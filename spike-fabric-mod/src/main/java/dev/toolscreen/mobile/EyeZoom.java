@@ -6,6 +6,7 @@ import net.minecraft.client.gui.DrawableHelper;
 import net.minecraft.client.util.Window;
 import net.minecraft.client.util.math.MatrixStack;
 import org.lwjgl.BufferUtils;
+import com.mojang.blaze3d.platform.GlStateManager;
 import org.lwjgl.opengl.GL11;
 
 import java.nio.ByteBuffer;
@@ -47,6 +48,20 @@ public final class EyeZoom {
 
     private static ByteBuffer pixelBuffer;
 
+    /**
+     * The most recent sample, kept so the side panel can be drawn later in the
+     * frame than it was taken.
+     *
+     * <p>The sample has to happen while Minecraft's own framebuffer is bound,
+     * before our crosshair goes down. The side panel is drawn after that
+     * framebuffer has been blitted to the screen, which is the only moment the
+     * letterboxed area is addressable. Those are different points in the frame,
+     * so the pixels are carried between them.
+     */
+    private static int[] lastPixels;
+    private static int lastRegionW;
+    private static int lastRegionH;
+
     private EyeZoom() {
     }
 
@@ -78,16 +93,21 @@ public final class EyeZoom {
                 int[] pixels = readRegion(fbWidth, fbHeight, regionW, regionH);
                 if (pixels != null) {
                     ToolscreenMobile.noteEyeZoomActive();
+                    lastPixels = pixels;
+                    lastRegionW = regionW;
+                    lastRegionH = regionH;
 
-                    int zoom = ToolscreenMobile.eyeZoomFactor();
-                    int panelW = regionW * zoom;
-                    int panelH = regionH * zoom;
-                    int panelX = (int) (window.getScaledWidth() * ToolscreenMobile.eyeZoomLeft()) - panelW / 2;
-                    int panelY = (int) (window.getScaledHeight() * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
+                    if (!ToolscreenMobile.eyeZoomSide()) {
+                        int zoom = ToolscreenMobile.eyeZoomFactor();
+                        int panelW = regionW * zoom;
+                        int panelH = regionH * zoom;
+                        int panelX = (int) (window.getScaledWidth() * ToolscreenMobile.eyeZoomLeft()) - panelW / 2;
+                        int panelY = (int) (window.getScaledHeight() * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
 
-                    drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoom);
-                    drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoom);
-                    drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoom);
+                        drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoom);
+                        drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoom);
+                        drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoom);
+                    }
                 }
             }
         }
@@ -211,5 +231,66 @@ public final class EyeZoom {
                                        int panelX, int panelY, int panelH, int zoom) {
         int x = panelX + (regionW / 2) * zoom;
         DrawableHelper.fill(matrices, x, panelY, x + 1, panelY + panelH, 0xFFFFFFFF);
+    }
+
+    /**
+     * Draws the panel into the letterboxed area beside the strip.
+     *
+     * <p>Called after Minecraft has blitted its framebuffer to the screen, the
+     * one moment in the frame when the full surface is addressable: everything
+     * drawn earlier goes into Minecraft's own framebuffer, which <em>is</em>
+     * the strip, so it can never reach the black.
+     *
+     * <p>Sets up a viewport and orthographic projection covering the whole
+     * surface, mirroring the sequence Minecraft itself uses a few lines
+     * earlier, then restores both. Coordinates here are real screen pixels,
+     * not GUI units, because outside the strip there is no GUI scale.
+     */
+    public static void renderSide(TextRenderer font, int blitX, int blitY, int blitW, int blitH) {
+        if (!ToolscreenMobile.eyeZoomSide() || !ToolscreenMobile.eyeZoomActive()) return;
+
+        int[] pixels = lastPixels;
+        if (pixels == null) return;
+
+        int realW = ToolscreenMobile.nativeWidth();
+        int realH = ToolscreenMobile.nativeHeight();
+        if (realW < 2 || realH < 2) return;
+
+        int regionW = lastRegionW;
+        int regionH = lastRegionH;
+        int zoom = ToolscreenMobile.eyeZoomFactor();
+        int panelW = regionW * zoom;
+        int panelH = regionH * zoom;
+        int panelX = (int) (realW * ToolscreenMobile.eyeZoomLeft()) - panelW / 2;
+        int panelY = (int) (realH * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
+
+        // Both matrix stacks are pushed and popped, and the viewport is put
+        // back to the blit's own rectangle afterwards. Minecraft resets all of
+        // this at the top of the next frame, but leaving the pipeline in a
+        // state it did not set is how one broken frame becomes a broken screen.
+        GlStateManager.matrixMode(GL11.GL_PROJECTION);
+        GlStateManager.pushMatrix();
+        GlStateManager.loadIdentity();
+        GlStateManager.ortho(0.0D, realW, realH, 0.0D, 1000.0D, 3000.0D);
+        GlStateManager.matrixMode(GL11.GL_MODELVIEW);
+        GlStateManager.pushMatrix();
+        GlStateManager.loadIdentity();
+        GlStateManager.translatef(0.0F, 0.0F, -2000.0F);
+        GlStateManager.viewport(0, 0, realW, realH);
+        GlStateManager.enableBlend();
+
+        try {
+            MatrixStack matrices = new MatrixStack();
+            drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoom);
+            drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoom);
+            drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoom);
+        } finally {
+            GlStateManager.viewport(blitX, blitY, blitW, blitH);
+            GlStateManager.matrixMode(GL11.GL_MODELVIEW);
+            GlStateManager.popMatrix();
+            GlStateManager.matrixMode(GL11.GL_PROJECTION);
+            GlStateManager.popMatrix();
+            GlStateManager.matrixMode(GL11.GL_MODELVIEW);
+        }
     }
 }

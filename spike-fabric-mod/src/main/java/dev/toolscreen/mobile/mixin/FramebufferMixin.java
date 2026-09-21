@@ -1,11 +1,16 @@
 package dev.toolscreen.mobile.mixin;
 
 import com.mojang.blaze3d.platform.GlStateManager;
+import dev.toolscreen.mobile.EyeZoom;
 import dev.toolscreen.mobile.ToolscreenMobile;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.Framebuffer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.Unique;
+import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Centres the rendered strip on screen.
@@ -54,6 +59,36 @@ public abstract class FramebufferMixin {
             require = 0)
     private void toolscreen$offsetBlitViewport(int x, int y, int width, int height) {
         ToolscreenMobile.noteCenteringActive();
-        GlStateManager.viewport(x + ToolscreenMobile.offsetX(), y + ToolscreenMobile.offsetY(), width, height);
+        lastBlitX = x + ToolscreenMobile.offsetX();
+        lastBlitY = y + ToolscreenMobile.offsetY();
+        lastBlitW = width;
+        lastBlitH = height;
+        GlStateManager.viewport(lastBlitX, lastBlitY, lastBlitW, lastBlitH);
     }
+
+    /**
+     * Draws the EyeZoom panel into the letterboxed area, once the strip has
+     * been blitted to the screen.
+     *
+     * <p>This is the only point in the frame where the full surface can be
+     * drawn to. Everything before it goes into Minecraft's own framebuffer,
+     * which is the strip itself, so it can never reach the black.
+     *
+     * <p>Guarded on the blit matching the window's reported framebuffer size,
+     * to pick out the main pass rather than any other framebuffer that happens
+     * to be drawn - shader effects use this same method.
+     */
+    @Inject(method = "drawInternal(IIZ)V", at = @At("TAIL"), require = 0)
+    private void toolscreen$drawSidePanel(int width, int height, boolean bl, CallbackInfo ci) {
+        if (!ToolscreenMobile.isOverrideActive()) return;
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.getWindow() == null) return;
+        if (width != client.getWindow().getFramebufferWidth()) return;
+        EyeZoom.renderSide(client.textRenderer, lastBlitX, lastBlitY, lastBlitW, lastBlitH);
+    }
+
+    @Unique private int lastBlitX;
+    @Unique private int lastBlitY;
+    @Unique private int lastBlitW;
+    @Unique private int lastBlitH;
 }
