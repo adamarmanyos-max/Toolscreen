@@ -2,4 +2,6 @@
 
 Porting Toolscreen — a Minecraft speedrunning screen-shape tool for Windows — to iOS, targeting the [Amethyst](https://github.com/AngelAuraMC/Amethyst-iOS) launcher.
 
-See [DESIGN.md](DESIGN.md) for the port analysis and proposed approaches.
+See [DESIGN.md](DESIGN.md) for the port analysis and proposed approaches,
+[spike-fabric-mod/](spike-fabric-mod/) for the working prototype, and
+[TESTING.md](TESTING.md) for how to install and test it on an iPad.
