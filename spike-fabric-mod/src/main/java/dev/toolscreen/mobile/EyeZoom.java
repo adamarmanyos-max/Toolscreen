@@ -158,14 +158,32 @@ public final class EyeZoom {
         return out;
     }
 
-    /** Each sampled pixel becomes one {@code zoom}-sized square. */
+    /**
+     * Each sampled pixel becomes one {@code zoom}-sized square.
+     *
+     * <p>Horizontally adjacent pixels of the same colour are merged into a
+     * single rectangle first. At the sizes the original uses — around 30x36 —
+     * drawing one quad per pixel would be over a thousand draw calls every
+     * frame, which is a lot to ask of a translation layer on a tablet. Terrain
+     * is full of runs of identical colour, so this usually collapses to a small
+     * fraction of that, and it is exact rather than approximate: the output is
+     * identical, just fewer calls.
+     */
     private static void drawPixels(MatrixStack matrices, int[] pixels, int regionW, int regionH,
                                    int panelX, int panelY, int zoom) {
         for (int row = 0; row < regionH; row++) {
-            for (int col = 0; col < regionW; col++) {
+            int rowStart = row * regionW;
+            int y = panelY + row * zoom;
+            int col = 0;
+            while (col < regionW) {
+                int colour = pixels[rowStart + col];
+                int run = 1;
+                while (col + run < regionW && pixels[rowStart + col + run] == colour) {
+                    run++;
+                }
                 int x = panelX + col * zoom;
-                int y = panelY + row * zoom;
-                DrawableHelper.fill(matrices, x, y, x + zoom, y + zoom, pixels[row * regionW + col]);
+                DrawableHelper.fill(matrices, x, y, x + run * zoom, y + zoom, colour);
+                col += run;
             }
         }
     }
@@ -187,17 +205,25 @@ public final class EyeZoom {
             int x = panelX + col * zoom;
             int colour = (offset % 2 == 0) ? 0xFFADD8E6 : 0xFFFFC0CB;
             DrawableHelper.fill(matrices, x, rulerY, x + zoom, rulerY + zoom, colour);
+            // Hairline between cells, so a long run stays countable by eye.
+            DrawableHelper.fill(matrices, x, rulerY, x + 1, rulerY + zoom, 0x40000000);
 
-            // Half scale: a two-digit number at full size does not fit a cell
-            // only a few GUI units wide.
             String label = Integer.toString(offset);
             int labelWidth = font.getWidth(label);
+            if (labelWidth <= 0) continue;
+
+            // Scaled to the cell rather than fixed. A cell is `zoom` wide, and
+            // zoom varies hugely: single figures inside the strip, tens out in
+            // the letterbox. A fixed size is either unreadable at one end or
+            // overflows at the other.
+            float scale = Math.min(2.5F, Math.max(0.5F, (zoom * 0.8F) / labelWidth));
+
             matrices.push();
-            matrices.scale(0.5F, 0.5F, 1.0F);
+            matrices.scale(scale, scale, 1.0F);
             font.draw(matrices,
                     label,
-                    (x + zoom / 2f) * 2f - labelWidth / 2f,
-                    (rulerY + zoom / 2f) * 2f - 4f,
+                    (x + zoom / 2f) / scale - labelWidth / 2f,
+                    (rulerY + zoom / 2f) / scale - font.fontHeight / 2f,
                     0xFF000000);
             matrices.pop();
         }

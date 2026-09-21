@@ -78,14 +78,20 @@ public final class ToolscreenMobile implements ClientModInitializer {
     // unit is one real pixel: a zoom of 6 meant six real pixels per game pixel,
     // far too fine to count. 10 with a smaller region keeps the panel inside
     // the strip while making each pixel legible.
-    private static volatile int eyeZoomRegionWidth = 12;
-    private static volatile int eyeZoomRegionHeight = 6;
-    private static volatile int eyeZoomFactor = 10;
-    private static volatile int eyeZoomRulerMax = 6;
+    // Proportioned from screenshots of the Windows tool: a panel roughly 30
+    // pixels across and taller than it is wide, with the ruler labelling the
+    // central 24 rather than the full width. Sized for the letterbox, which is
+    // over a thousand pixels wide on an iPad - far more room than the strip.
+    private static volatile int eyeZoomRegionWidth = 30;
+    private static volatile int eyeZoomRegionHeight = 36;
+    private static volatile int eyeZoomFactor = 22;
+    private static volatile int eyeZoomRulerMax = 12;
     // Just below the crosshair rather than up in the sky: close enough to read
     // without moving your eye far, clear of the centre region being sampled.
-    private static volatile double eyeZoomTop = 0.62;
-    private static volatile double eyeZoomLeft = 0.5;
+    // Centred in the left letterbox band, matching where the Windows tool puts
+    // it. These are fractions of the whole screen when eyezoomSide is on.
+    private static volatile double eyeZoomTop = 0.5;
+    private static volatile double eyeZoomLeft = 0.23;
     private static volatile boolean eyeZoomSide = true;
     private static volatile boolean eyeZoomReported;
     private static volatile boolean overlayHookReported;
