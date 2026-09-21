@@ -96,11 +96,15 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
     // The original fills the area around the game rather than leaving it bare;
     // its localization table carries background, bg_image_path and color_stops.
-    private static volatile boolean backgroundEnabled = true;
+    // Off by default: the first attempt painted over the game itself. Until
+    // the geometry below is confirmed against a real device, bare black is the
+    // safe state - an ugly letterbox beats an invisible game.
+    private static volatile boolean backgroundEnabled = false;
     private static volatile int backgroundTop = 0x1A0533;
     private static volatile int backgroundBottom = 0x4A1594;
     private static volatile boolean eyeZoomReported;
     private static volatile boolean overlayHookReported;
+    private static volatile boolean surfaceReported;
     private static volatile boolean crosshairEnabled = true;
     private static volatile int crosshairSize = 3;
     private static volatile int crosshairGap = 2;
@@ -228,6 +232,22 @@ public final class ToolscreenMobile implements ClientModInitializer {
      */
     public static boolean eyeZoomSide() {
         return eyeZoomSide;
+    }
+
+    /**
+     * Logs the surface and blit geometry once.
+     *
+     * <p>The background fill paints the four bands around the strip, which is
+     * only correct if the blit rectangle and the surface size are in the same
+     * coordinate space. When the fill covered everything, those numbers were
+     * the missing evidence, and they cannot be obtained from a build machine.
+     */
+    public static void noteSurfaceGeometry(int surfaceW, int surfaceH,
+                                           int blitX, int blitY, int blitW, int blitH) {
+        if (surfaceReported) return;
+        surfaceReported = true;
+        LOGGER.info("[{}] surface {}x{}, blit x={} y={} w={} h={}",
+                MOD_ID, surfaceW, surfaceH, blitX, blitY, blitW, blitH);
     }
 
     public static boolean backgroundEnabled() {

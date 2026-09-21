@@ -284,11 +284,22 @@ public final class EyeZoom {
      * surface would paint over the strip that was just drawn into it.
      */
     public static void renderBackground(int blitX, int blitY, int blitW, int blitH) {
-        if (!ToolscreenMobile.backgroundEnabled() || !ToolscreenMobile.isOverrideActive()) return;
+        if (!ToolscreenMobile.isOverrideActive()) return;
 
         int realW = ToolscreenMobile.nativeWidth();
         int realH = ToolscreenMobile.nativeHeight();
+        ToolscreenMobile.noteSurfaceGeometry(realW, realH, blitX, blitY, blitW, blitH);
+
+        if (!ToolscreenMobile.backgroundEnabled()) return;
         if (realW < 2 || realH < 2) return;
+
+        // Refuse to paint if the blit does not sit inside the surface. If those
+        // two disagree the bands are meaningless and would cover the game,
+        // which is exactly what happened the first time.
+        if (blitW <= 0 || blitH <= 0 || blitX < 0 || blitY < 0
+                || blitX + blitW > realW || blitY + blitH > realH) {
+            return;
+        }
 
         // The blit rectangle is in GL coordinates, whose origin is bottom-left;
         // everything drawn here is in the top-left origin the ortho sets up.
