@@ -29,8 +29,17 @@ public final class ToolscreenMobile implements ClientModInitializer {
     public static final String MOD_ID = "toolscreen-mobile";
     private static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
-    /** GLFW_KEY_F6. Amethyst's on-screen buttons emit GLFW key codes, so a key binding is also a touch binding. */
-    private static final int DEFAULT_TOGGLE_KEY = 295;
+    /**
+     * GLFW_KEY_GRAVE_ACCENT (the {@code `} key).
+     *
+     * <p>Deliberately not a function key: plenty of tablet and compact keyboards
+     * have no F-row at all. Grave accent is present on essentially every layout
+     * and is unbound in vanilla Minecraft.
+     *
+     * <p>Amethyst's on-screen buttons emit GLFW key codes too, so whatever is
+     * set here works as a touch binding as well as a physical key.
+     */
+    private static final int DEFAULT_TOGGLE_KEY = 96;
 
     private static final List<Mode> DEFAULT_MODES = List.of(
             new Mode("Native", 1.00, 1.00),
@@ -46,7 +55,8 @@ public final class ToolscreenMobile implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         loadConfig();
-        LOGGER.info("[{}] ready: {} mode(s), toggle key code {}", MOD_ID, modes.size(), toggleKey);
+        LOGGER.info("[{}] ready: {} mode(s), toggle key {} ({})",
+                MOD_ID, modes.size(), KeyCodes.nameOf(toggleKey, "?"), toggleKey);
     }
 
     public static Mode activeMode() {
@@ -101,7 +111,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
             return;
         }
 
-        toggleKey = parseInt(props.getProperty("toggleKey"), DEFAULT_TOGGLE_KEY);
+        toggleKey = KeyCodes.resolve(props.getProperty("toggleKey"), DEFAULT_TOGGLE_KEY);
 
         List<Mode> parsed = parseModes(props.getProperty("modes"));
         if (!parsed.isEmpty()) {
@@ -134,15 +144,6 @@ public final class ToolscreenMobile implements ClientModInitializer {
         return parsed;
     }
 
-    private static int parseInt(String raw, int fallback) {
-        if (raw == null) return fallback;
-        try {
-            return Integer.parseInt(raw.trim());
-        } catch (NumberFormatException e) {
-            return fallback;
-        }
-    }
-
     private static void writeDefaultConfig(Path file) {
         StringBuilder modeList = new StringBuilder();
         for (Mode mode : DEFAULT_MODES) {
@@ -152,14 +153,15 @@ public final class ToolscreenMobile implements ClientModInitializer {
         }
 
         Properties props = new Properties();
-        props.setProperty("toggleKey", Integer.toString(DEFAULT_TOGGLE_KEY));
+        props.setProperty("toggleKey", KeyCodes.nameOf(DEFAULT_TOGGLE_KEY, Integer.toString(DEFAULT_TOGGLE_KEY)));
         props.setProperty("modes", modeList.toString());
 
         try {
             Files.createDirectories(file.getParent());
             try (OutputStream out = Files.newOutputStream(file)) {
                 props.store(out, "Toolscreen mobile (spike). "
-                        + "toggleKey = GLFW key code that cycles modes (295 = F6). "
+                        + "toggleKey = the key that cycles modes: a GLFW key name such as "
+                        + "GRAVE_ACCENT, BACKSLASH, RIGHT_BRACKET or G, or a raw numeric code. "
                         + "modes = comma separated Name:WidthFractionxHeightFraction, "
                         + "fractions of the native surface, 0.01 to 1.0.");
             }

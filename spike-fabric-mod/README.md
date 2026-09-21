@@ -44,14 +44,27 @@ less version to pin and one less jar to move onto the device.
 First launch writes `config/toolscreen-mobile.properties`:
 
 ```properties
-toggleKey=295
+toggleKey=GRAVE_ACCENT
 modes=Native:1.0x1.0, Thin:0.2x1.0, Eye Measure:0.1x1.0, Wide Short:1.0x0.45
 ```
 
-- `toggleKey` — GLFW key code that cycles modes (295 = F6). Bind an Amethyst
-  on-screen button to the same code.
+- `toggleKey` — the key that cycles modes. Accepts a **GLFW key name**
+  (`GRAVE_ACCENT`, `BACKSLASH`, `RIGHT_BRACKET`, `G`, `UP`, …) or a raw numeric
+  code. Case, surrounding spaces and a `GLFW_KEY_` prefix are all tolerated.
+  Amethyst's on-screen buttons emit the same codes, so one setting covers both a
+  physical key and a touch button.
 - `modes` — `Name:WidthFractionxHeightFraction`, as **fractions of the device's
   native surface**, 0.01–1.0.
+
+The default is `` ` `` rather than a function key, because plenty of tablet and
+compact keyboards have no F-row at all. Other keys unbound in vanilla 1.16.1 and
+easy to reach: `` ` `` `\` `[` `]` `;` `'` `,` `.` `-` `=`. Avoid `/` and `T`,
+which open chat.
+
+The name table is generated directly from Amethyst's own
+`Natives/glfw_keycodes.h`, so the codes match what the launcher actually
+delivers — including its `DPAD_*` naming for the arrow keys, aliased to the
+standard `UP` / `DOWN` / `LEFT` / `RIGHT` here.
 
 Fractions rather than Toolscreen's absolute `game_width`/`game_height` because a
 desktop monitor is a fixed known size, while the same config here has to survive
