@@ -33,25 +33,22 @@ jobs:
         working-directory: spike-fabric-mod
         run: ./gradlew build --stacktrace --no-daemon
 
-      # Temporary diagnostic: the Mixin annotation processor only warns when it
-      # cannot map a method selector, so a wrong signature compiles fine and
-      # fails at runtime. Print the real ones from the remapped jar.
-      - name: Dump Framebuffer signatures
+      # Temporary diagnostic: find which method actually contains the
+      # RenderSystem.viewport call, by disassembling rather than guessing.
+      - name: Locate viewport call
         if: always()
         working-directory: spike-fabric-mod
         run: |
-          set -eux
+          set -eu
           for jar in $(find ~/.gradle/caches -name "*.jar" 2>/dev/null | grep -i minecraft | head -20); do
             if javap -p -cp "$jar" net.minecraft.client.gl.Framebuffer >/dev/null 2>&1; then
-              echo "=== FOUND IN: $jar ==="
-              javap -p -cp "$jar" net.minecraft.client.gl.Framebuffer
-              echo "=== RenderSystem.viewport ==="
-              javap -p -cp "$jar" com.mojang.blaze3d.systems.RenderSystem 2>/dev/null | grep -i viewport || true
+              javap -c -p -cp "$jar" net.minecraft.client.gl.Framebuffer > /tmp/fb.txt
+              echo "=== method boundaries and viewport calls ==="
+              grep -nE "^  [a-z].*\(|viewport|glViewport" /tmp/fb.txt
               exit 0
             fi
           done
-          echo "NOT FOUND — candidate jars:"
-          find ~/.gradle/caches -name "*.jar" 2>/dev/null | grep -i minecraft | head -30
+          echo "jar not found"
 
       # Uploaded even on failure: a failed run still tells us which yarn names
       # were wrong, which is the whole point of this workflow right now.
