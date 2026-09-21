@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "toolscreen-mobile",
+  "version": "${version}",
+  "name": "Toolscreen Mobile (spike)",
+  "description": "Stretched / thin screen shapes for Minecraft speedrunning on iOS, for the Amethyst launcher. Spike build: proves a Java-side framebuffer override survives the launcher's native resize events.",
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "dev.toolscreen.mobile.ToolscreenMobile"
+    ]
+  },
+  "mixins": [
+    "toolscreen-mobile.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.14.0",
+    "minecraft": "1.16.1",
+    "java": ">=17"
+  }
+}
