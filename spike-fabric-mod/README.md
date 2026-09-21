@@ -64,65 +64,71 @@ spike and a useless one.
 
 ## Building
 
-Requires network access to `maven.fabricmc.net`, `piston-meta.mojang.com` and
-`libraries.minecraft.net`.
+Pre-built jars come from CI — every push builds one and attaches it to the run,
+so **no local build environment and no Mac are needed**. Grab it from the
+[Actions tab](https://github.com/adamarmanyos-max/Toolscreen/actions/workflows/build-mod.yml):
+open the latest green run and download the `toolscreen-mobile` artifact.
+
+To build locally instead (any OS with JDK 17 — this is a Java mod, not an iOS
+app):
 
 ```bash
 cd spike-fabric-mod
-gradle build        # or ./gradlew build
+./gradlew build
 ```
 
-The jar lands in `build/libs/`. Copy it to Amethyst's `.minecraft/mods/`
+The jar lands in `build/libs/`. Copy it into Amethyst's `.minecraft/mods/`
 alongside Fabric Loader for 1.16.1.
+
+Gradle is pinned to **8.7** by the wrapper: Loom 1.6 calls
+`org.gradle.api.problems.Problems.forNamespace`, which existed in Gradle 8.6
+through 8.12 and was removed by 8.13. Newer Gradle fails at configuration time
+with `NoSuchMethodError` before compiling anything.
 
 ---
 
-## Status — read this before testing
+## Status
 
-**This has never been compiled or run.** It was written in an environment whose
-egress proxy denies Fabric's and Mojang's Maven hosts:
+**Compiles clean.** CI builds it with Fabric Loom 1.6.12 against Minecraft
+1.16.1 / yarn `1.16.1+build.21` on JDK 17: `compileJava`, `jar`, `remapJar` and
+`remapSourcesJar` all succeed.
 
-```
-maven.fabricmc.net:443     — connect_rejected (organization policy)
-piston-meta.mojang.com:443 — connect_rejected
-libraries.minecraft.net:443 — connect_rejected
-```
+That result is worth more than it looks. Loom runs the Mixin annotation
+processor during `compileJava`, and it resolves `@Shadow` and `@Inject` targets
+against the remapped Minecraft classes — an unresolvable name is a compile
+error. A successful build therefore **confirms every yarn name the mod depends
+on**:
 
-so Loom could not fetch Minecraft or the yarn mappings. What *was* verified:
-`Mode`'s fraction/rounding/clamping logic passes a standalone unit test (even
-rounding, floor of 2, clamping, NaN fallback, blank-name rejection), and both
-JSON resources parse. Nothing that touches Minecraft has been checked by a
-compiler.
-
-### Expect to fix on first build
-
-The yarn names below are from memory and are the most likely breakages. The
-compiler will tell you immediately, and each is a rename, not a redesign:
-
-| Used | Where |
+| Name | Used by |
 | --- | --- |
 | `Window#getFramebufferWidth` / `getFramebufferHeight` | `WindowMixin` inject targets |
-| `Window.framebufferWidth` / `framebufferHeight` fields | `WindowMixin` `@Shadow` |
+| `Window.framebufferWidth` / `framebufferHeight` | `WindowMixin` `@Shadow` fields |
 | `InputUtil.isKeyPressed(long, int)` | `MinecraftClientMixin` |
 | `MinecraftClient#onResolutionChanged()` | `MinecraftClientMixin` |
 | `MinecraftClient#tick` | `MinecraftClientMixin` inject target |
 
-`fabric-loom 1.6-SNAPSHOT` against 1.16.1 with a Java 17 toolchain may also need
-a version nudge.
+`Mode`'s fraction/rounding/clamping logic also passes a standalone unit test
+(even rounding, floor of 2, clamping, NaN fallback, blank-name rejection), and
+both JSON resources parse.
 
-### Open questions the spike is meant to answer
+### What is still unproven
 
-1. **Does the override survive a real resize?** The code reasons it should, from
-   the launcher's event path. Rotate the device and resume the app to confirm.
-2. **Touch input alignment.** Minecraft maps cursor position through the window
-   dimensions it believes in, while touches land on the *real* surface. Touch
-   coordinates are likely to misalign once the reported size diverges — this is
-   the single biggest risk to the whole route, and the main thing to measure.
-3. **Does the area outside the render get cleared?** The blit only covers the
+Compiling is not running. **The mod has never been launched**, on iOS or
+anywhere — nothing below has been observed, only reasoned about from the
+launcher's source. These are the questions the spike exists to answer:
+
+1. **Does the override survive a real resize?** The reasoning says yes: a
+   genuine resize calls Minecraft's callback, which re-reads the overridden
+   getters. Rotate the device and background/resume the app to confirm.
+2. **Touch input alignment.** Minecraft maps cursor position through the
+   dimensions it believes in, while touches land on the *real* surface. Taps are
+   likely to misalign once the reported size diverges. **This is the biggest
+   risk to the whole route** and the main thing to measure.
+3. **Does the area outside the render get cleared?** The blit covers only the
    sub-rect; the rest of the default framebuffer may retain stale frames and
-   smear. If so, it needs an explicit clear.
-4. **Is a thin window actually usable with touch controls at all?** The question
-   that decides whether any of this is worth building out.
+   smear. If so it needs an explicit clear.
+4. **Is a thin window usable with touch controls at all?** The question that
+   decides whether any of this is worth building out.
 
 If (1) holds and (2) is fixable, Route C is viable and independently shippable
 to every stock-Amethyst user. If (2) proves intractable, that is a strong
