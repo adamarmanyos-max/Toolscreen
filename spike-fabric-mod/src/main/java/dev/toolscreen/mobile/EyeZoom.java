@@ -57,6 +57,7 @@ public final class EyeZoom {
      * @param font     the HUD's text renderer, for the ruler numbers
      */
     public static void render(MatrixStack matrices, MinecraftClient client, TextRenderer font) {
+        ToolscreenMobile.noteOverlayHookFired();
         if (!ToolscreenMobile.eyeZoomActive()) return;
 
         Window window = client.getWindow();

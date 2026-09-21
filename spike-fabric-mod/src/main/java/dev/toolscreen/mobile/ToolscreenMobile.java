@@ -84,6 +84,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile int eyeZoomRulerMax = 6;
     private static volatile double eyeZoomTop = 0.12;
     private static volatile boolean eyeZoomReported;
+    private static volatile boolean overlayHookReported;
 
     /** Where the rendered area sits within the real screen. */
     public enum Align { LEFT, CENTER, RIGHT }
@@ -140,6 +141,23 @@ public final class ToolscreenMobile implements ClientModInitializer {
     /** Vertical position of the panel, as a fraction of the strip's height. */
     public static double eyeZoomTop() {
         return eyeZoomTop;
+    }
+
+    /**
+     * Logged once the first time the render hook runs at all.
+     *
+     * <p>Paired with {@link #noteEyeZoomActive()} this gives a diagnostic
+     * ladder in latest.log, so a non-appearing overlay can be placed exactly:
+     * no line at all means the mixin never attached or the method is never
+     * called; this line without the drawing line means the active mode is not
+     * one listed under eyezoomModes; both lines mean it is drawing and the
+     * problem is visual rather than structural.
+     */
+    public static void noteOverlayHookFired() {
+        if (overlayHookReported) return;
+        overlayHookReported = true;
+        LOGGER.info("[{}] overlay hook firing (mode={}, eyezoom={})",
+                MOD_ID, activeMode().name(), eyeZoomActive());
     }
 
     /**

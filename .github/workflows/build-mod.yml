@@ -18,6 +18,10 @@ on:
         description: "Space-separated fully-qualified classes to dump signatures for"
         required: false
         type: string
+      filter:
+        description: "Optional regex to keep only matching signature lines"
+        required: false
+        type: string
 
 jobs:
   build:
@@ -47,6 +51,7 @@ jobs:
         working-directory: spike-fabric-mod
         env:
           CLASSES: ${{ inputs.classes }}
+          FILTER: ${{ inputs.filter }}
         run: |
           set -eu
           LIST="${CLASSES:-}"
@@ -62,7 +67,7 @@ jobs:
           for c in $LIST; do
             echo ""
             echo "================ $c ================"
-            javap -p -cp "$JAR" "$c" 2>&1 | head -80
+            javap -p -cp "$JAR" "$c" 2>&1 | grep -E "${FILTER:-.}" | head -250
           done
 
       # Uploaded even on failure: a failed run still tells us which yarn names
