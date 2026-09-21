@@ -36,7 +36,7 @@ jobs:
       # Temporary diagnostic: find which method actually contains the
       # RenderSystem.viewport call, by disassembling rather than guessing.
       - name: Locate viewport call
-        if: always()
+        if: github.event_name == 'workflow_dispatch' 
         working-directory: spike-fabric-mod
         run: |
           set -eu
