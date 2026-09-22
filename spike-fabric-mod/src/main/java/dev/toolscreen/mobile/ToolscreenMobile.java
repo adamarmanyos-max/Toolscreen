@@ -51,7 +51,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static final List<Mode> DEFAULT_MODES = List.of(
             new Mode("Native", 1.00, 1.00),
             new Mode("Thin", 0.14, 1.00),
-            new Mode("Eye Measure", 0.08, 1.00),
+            new Mode("Eye Measure", 0.11, 1.00),
             new Mode("Wide Short", 1.00, 0.25)
     );
 
@@ -86,12 +86,11 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile int eyeZoomRegionHeight = 24;
 
     // Separate horizontal and vertical magnification, as the original has:
-    // its strings carry clone_width and clone_height independently. Measuring
-    // its screenshots, a ruler cell is about 22px wide while a pixel row is
-    // about 45px tall, so each game pixel is drawn roughly twice as tall as it
-    // is wide. Square pixels here looked visibly unlike it.
-    private static volatile int eyeZoomFactorX = 28;
-    private static volatile int eyeZoomFactorY = 56;
+    // its strings carry clone_width and clone_height independently. The stretch
+    // runs along X - each game pixel is drawn wider than it is tall, which
+    // suits a ruler that counts horizontal offsets.
+    private static volatile int eyeZoomFactorX = 56;
+    private static volatile int eyeZoomFactorY = 28;
     private static volatile int eyeZoomRulerMax = 12;
     // Just below the crosshair rather than up in the sky: close enough to read
     // without moving your eye far, clear of the centre region being sampled.
@@ -104,12 +103,25 @@ public final class ToolscreenMobile implements ClientModInitializer {
     // The original fills the area around the game rather than leaving it bare;
     // its localization table carries background, bg_image_path and color_stops.
     private static volatile boolean backgroundEnabled = true;
+
     private static volatile int backgroundTop = 0x1A0533;
     private static volatile int backgroundBottom = 0x4A1594;
+
+    /**
+     * Multiplier on the game's field of view. Below 1.0 narrows it, which
+     * magnifies the view.
+     *
+     * <p>Minecraft's own FOV slider stops at 30, and for measuring you want to
+     * go further: a narrower field spreads the same view over more pixels, so
+     * each pixel covers a smaller angle and a pixel count means more.
+     */
+    private static volatile double fovScale = 0.5;
+
     private static volatile boolean eyeZoomReported;
     private static volatile boolean overlayHookReported;
     private static volatile boolean surfaceReported;
     private static volatile boolean bindingReported;
+    private static volatile boolean fovReported;
     private static volatile boolean crosshairEnabled = true;
     private static volatile int crosshairSize = 3;
     private static volatile int crosshairGap = 2;
@@ -226,6 +238,20 @@ public final class ToolscreenMobile implements ClientModInitializer {
                 eyeZoomFactorX, eyeZoomFactorY, eyeZoomRulerMax);
     }
 
+    /**
+     * Logged once when the FOV override actually takes effect.
+     *
+     * <p>Same reasoning as {@link #noteEyeZoomActive()}: the injection is
+     * optional, so without this the difference between "narrowing the view" and
+     * "mixin never attached" is a judgement call made from a screenshot.
+     */
+    public static void noteFovActive(double original, double scaled) {
+        if (fovReported) return;
+        fovReported = true;
+        LOGGER.info("[{}] fov override: {} -> {} (scale {})",
+                MOD_ID, original, scaled, fovScale);
+    }
+
     /** Real surface width, before any mode override. */
     public static int nativeWidth() {
         return nativeWidth;
@@ -272,6 +298,10 @@ public final class ToolscreenMobile implements ClientModInitializer {
         bindingReported = true;
         LOGGER.info("[{}] background: framebuffer {} bound ({})",
                 MOD_ID, binding, binding == 0 ? "screen, painting" : "not the screen, skipping");
+    }
+
+    public static double fovScale() {
+        return fovScale;
     }
 
     public static boolean backgroundEnabled() {
@@ -395,6 +425,8 @@ public final class ToolscreenMobile implements ClientModInitializer {
         eyeZoomLeft = clampDouble(props.getProperty("eyezoomLeft"), eyeZoomLeft, 0.0, 1.0);
         eyeZoomSide = !"false".equalsIgnoreCase(String.valueOf(props.getProperty("eyezoomSide")).trim());
 
+        fovScale = clampDouble(props.getProperty("fovScale"), fovScale, 0.05, 1.0);
+
         backgroundEnabled = !"false".equalsIgnoreCase(String.valueOf(props.getProperty("background")).trim());
         backgroundTop = parseColour(props.getProperty("backgroundTop"), backgroundTop);
         backgroundBottom = parseColour(props.getProperty("backgroundBottom"), backgroundBottom);
@@ -507,6 +539,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("eyezoomTop", Double.toString(eyeZoomTop));
         props.setProperty("eyezoomLeft", Double.toString(eyeZoomLeft));
         props.setProperty("eyezoomSide", Boolean.toString(eyeZoomSide));
+        props.setProperty("fovScale", Double.toString(fovScale));
         props.setProperty("background", Boolean.toString(backgroundEnabled));
         props.setProperty("backgroundTop", String.format("#%06X", backgroundTop));
         props.setProperty("backgroundBottom", String.format("#%06X", backgroundBottom));
