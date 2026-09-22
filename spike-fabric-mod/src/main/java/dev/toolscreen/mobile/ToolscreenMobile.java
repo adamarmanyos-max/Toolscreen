@@ -145,6 +145,9 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile boolean fovReported;
     private static volatile boolean panelReported;
     private static volatile boolean suppressReported;
+    private static volatile boolean feedbackReported;
+    private static volatile int lastReportedWidth;
+    private static volatile int lastReportedHeight;
     private static volatile boolean crosshairEnabled = true;
     private static volatile int crosshairSize = 3;
     private static volatile int crosshairGap = 2;
@@ -363,8 +366,43 @@ public final class ToolscreenMobile implements ClientModInitializer {
     }
 
     public static void recordNativeSize(int width, int height) {
+        if (width < 2 || height < 2) return;
+
+        // Ignore our own numbers coming back as the "real" size.
+        //
+        // Amethyst's glfwSetWindowSize is a stub that only records what it is
+        // given, and glfwGetFramebufferSize reads those same numbers back, so a
+        // width we returned from the override can arrive here as the surface
+        // size. Resolving the mode against that shrinks the render by the mode's
+        // fraction a second time, and again on the next resize: 2360 becomes
+        // 260, then 28, then the floor. The game is then rendering a handful of
+        // pixels and the launcher stretches them over the strip, which is what a
+        // screenshot showed - a perfect 57-pixel grid across the whole strip,
+        // horizontally and vertically, which no amount of perspective can
+        // produce.
+        //
+        // The native size is whatever was last seen that we did not produce.
+        if (nativeWidth >= 2 && width == lastReportedWidth && height == lastReportedHeight) {
+            noteSizeFeedback(width, height);
+            return;
+        }
+
         nativeWidth = width;
         nativeHeight = height;
+    }
+
+    /** Records what the override last reported, so it can be recognised coming back. */
+    public static void recordReportedSize(int width, int height) {
+        lastReportedWidth = width;
+        lastReportedHeight = height;
+    }
+
+    private static void noteSizeFeedback(int width, int height) {
+        if (feedbackReported) return;
+        feedbackReported = true;
+        LOGGER.warn("[{}] ignoring {}x{} as the surface size: it is what this mod "
+                        + "last reported, so treating it as real would shrink the render again",
+                MOD_ID, width, height);
     }
 
     /**

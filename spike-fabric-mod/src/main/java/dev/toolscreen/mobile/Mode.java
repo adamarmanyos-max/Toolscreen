@@ -53,10 +53,26 @@ public record Mode(String name, double width, double height) {
      * <p>Clamped to the native size, since reporting a framebuffer larger than
      * the real surface would place the blit partly off-screen.
      */
+    /**
+     * Smallest render this will ask for, unless the surface itself is smaller.
+     *
+     * <p>A strip narrower than this is not a shape, it is a fault: the tool
+     * measures offsets in rendered pixels, and there have to be enough of them
+     * to count. It exists because a feedback loop between the override and the
+     * launcher's window stubs once collapsed the render to a handful of pixels,
+     * which the launcher then stretched over the strip - and nothing in this
+     * arithmetic objected, because each step on its own was reasonable.
+     */
+    private static final int MIN_USEFUL_PIXELS = 64;
+
     public static int resolve(int nativePixels, double value) {
         double raw = isFraction(value) ? nativePixels * value : value;
         int resolved = (int) Math.round(raw);
         if (resolved > nativePixels) resolved = nativePixels;
+
+        int floor = Math.min(MIN_USEFUL_PIXELS, nativePixels);
+        if (resolved < floor) resolved = floor;
+
         if (resolved % 2 != 0) resolved--;
         return Math.max(2, resolved);
     }

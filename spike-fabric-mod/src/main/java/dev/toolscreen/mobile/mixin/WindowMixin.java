@@ -44,15 +44,20 @@ public abstract class WindowMixin {
     /** GUI units per framebuffer pixel, as chosen by Minecraft's auto scaling. */
     @Shadow private double scaleFactor;
 
+    // Both getters resolve against ToolscreenMobile's recorded native size
+    // rather than the shadowed field. The field can hold a value this override
+    // produced - Amethyst's window-size stubs record what they are given and
+    // hand it back - and resolving a fraction against an already-reduced width
+    // applies the fraction twice. Recording the size separately gives one place
+    // to recognise that and refuse it.
     @Inject(method = "getFramebufferWidth", at = @At("HEAD"), cancellable = true)
     private void toolscreen$overrideFramebufferWidth(CallbackInfoReturnable<Integer> cir) {
-        // Recorded unconditionally: once the getters start lying, this is the
-        // only place the real surface size is still visible, and FramebufferMixin
-        // needs it to work out the centring offset.
         ToolscreenMobile.recordNativeSize(this.framebufferWidth, this.framebufferHeight);
         if (!ToolscreenMobile.isOverrideActive()) return;
         Mode mode = ToolscreenMobile.activeMode();
-        cir.setReturnValue(mode.resolveWidth(this.framebufferWidth));
+        int width = mode.resolveWidth(ToolscreenMobile.nativeWidth());
+        ToolscreenMobile.recordReportedSize(width, mode.resolveHeight(ToolscreenMobile.nativeHeight()));
+        cir.setReturnValue(width);
     }
 
     @Inject(method = "getFramebufferHeight", at = @At("HEAD"), cancellable = true)
@@ -60,7 +65,7 @@ public abstract class WindowMixin {
         ToolscreenMobile.recordNativeSize(this.framebufferWidth, this.framebufferHeight);
         if (!ToolscreenMobile.isOverrideActive()) return;
         Mode mode = ToolscreenMobile.activeMode();
-        cir.setReturnValue(mode.resolveHeight(this.framebufferHeight));
+        cir.setReturnValue(mode.resolveHeight(ToolscreenMobile.nativeHeight()));
     }
 
     // ---- GUI coordinate space ---------------------------------------------
@@ -79,14 +84,14 @@ public abstract class WindowMixin {
     @Inject(method = "getScaledWidth", at = @At("HEAD"), cancellable = true)
     private void toolscreen$overrideScaledWidth(CallbackInfoReturnable<Integer> cir) {
         if (!ToolscreenMobile.isOverrideActive() || this.scaleFactor <= 0) return;
-        int width = ToolscreenMobile.activeMode().resolveWidth(this.framebufferWidth);
+        int width = ToolscreenMobile.activeMode().resolveWidth(ToolscreenMobile.nativeWidth());
         cir.setReturnValue((int) Math.ceil(width / this.scaleFactor));
     }
 
     @Inject(method = "getScaledHeight", at = @At("HEAD"), cancellable = true)
     private void toolscreen$overrideScaledHeight(CallbackInfoReturnable<Integer> cir) {
         if (!ToolscreenMobile.isOverrideActive() || this.scaleFactor <= 0) return;
-        int height = ToolscreenMobile.activeMode().resolveHeight(this.framebufferHeight);
+        int height = ToolscreenMobile.activeMode().resolveHeight(ToolscreenMobile.nativeHeight());
         cir.setReturnValue((int) Math.ceil(height / this.scaleFactor));
     }
 }

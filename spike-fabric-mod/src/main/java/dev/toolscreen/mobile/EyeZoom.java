@@ -133,11 +133,6 @@ public final class EyeZoom {
             }
         }
 
-        // Hiding the HUD takes the game's own crosshair with it, and a stretched
-        // screen is useless for aiming without one.
-        if (ToolscreenMobile.crosshairEnabled() && ToolscreenMobile.isOverrideActive()) {
-            drawCrosshair(matrices, window);
-        }
     }
 
     /**
@@ -264,24 +259,37 @@ public final class EyeZoom {
     /**
      * A replacement for the vanilla crosshair, which is lost with the HUD.
      *
+     * <p>Drawn in the screen pass, over the blitted strip, and deliberately
+     * <em>after</em> the sample has been taken. Drawing it into Minecraft's
+     * framebuffer instead put it in the picture the magnifier then photographs:
+     * a screenshot showed its two vertical arms magnified into 110x73 white
+     * slabs above and below the centre, with the horizontal pair hidden under
+     * the ruler. The crosshair marks the pixel being measured, so it is the one
+     * thing that must never be part of the measurement.
+     *
      * <p>Deliberately a thin plain cross rather than a copy of the vanilla
-     * texture: this one marks the exact centre pixel, which is the reference
-     * the ruler counts from.
+     * texture: this one marks the exact centre pixel, which is the reference the
+     * ruler counts from. Sized in real pixels, scaled off the strip so it stays
+     * visible without swamping it.
      */
-    private static void drawCrosshair(MatrixStack matrices, Window window) {
-        int cx = window.getScaledWidth() / 2;
-        int cy = window.getScaledHeight() / 2;
-        int arm = ToolscreenMobile.crosshairSize();
-        int gap = ToolscreenMobile.crosshairGap();
+    private static void drawCrosshair(MatrixStack matrices, int blitX, int blitY, int blitW, int blitH) {
+        if (!ToolscreenMobile.crosshairEnabled()) return;
+
+        int cx = blitX + blitW / 2;
+        int cy = blitY + blitH / 2;
+        int scale = Math.max(1, blitW / 64);
+        int arm = ToolscreenMobile.crosshairSize() * scale;
+        int gap = ToolscreenMobile.crosshairGap() * scale;
+        int thickness = Math.max(1, scale);
         int colour = 0xFFFFFFFF;
 
         // Four separate arms with a gap at the centre, rather than a solid
         // plus. The gap leaves the exact pixel being measured visible, which a
         // filled centre would cover - and that pixel is the whole point.
-        DrawableHelper.fill(matrices, cx - gap - arm, cy, cx - gap, cy + 1, colour);
-        DrawableHelper.fill(matrices, cx + gap + 1, cy, cx + gap + 1 + arm, cy + 1, colour);
-        DrawableHelper.fill(matrices, cx, cy - gap - arm, cx + 1, cy - gap, colour);
-        DrawableHelper.fill(matrices, cx, cy + gap + 1, cx + 1, cy + gap + 1 + arm, colour);
+        DrawableHelper.fill(matrices, cx - gap - arm, cy, cx - gap, cy + thickness, colour);
+        DrawableHelper.fill(matrices, cx + gap + thickness, cy, cx + gap + thickness + arm, cy + thickness, colour);
+        DrawableHelper.fill(matrices, cx, cy - gap - arm, cx + thickness, cy - gap, colour);
+        DrawableHelper.fill(matrices, cx, cy + gap + thickness, cx + thickness, cy + gap + thickness + arm, colour);
     }
 
     /** The reference axis: the boundary between the two centre pixels. */
@@ -483,6 +491,7 @@ public final class EyeZoom {
             drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoomX, zoomY);
             drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoomX, rulerH);
             drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoomX);
+            drawCrosshair(matrices, blitX, blitY, blitW, blitH);
         });
     }
 
