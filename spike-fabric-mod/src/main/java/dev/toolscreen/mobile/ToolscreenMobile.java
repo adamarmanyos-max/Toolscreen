@@ -102,6 +102,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile boolean eyeZoomReported;
     private static volatile boolean overlayHookReported;
     private static volatile boolean surfaceReported;
+    private static volatile boolean bindingReported;
     private static volatile boolean crosshairEnabled = true;
     private static volatile int crosshairSize = 3;
     private static volatile int crosshairGap = 2;
@@ -245,6 +246,20 @@ public final class ToolscreenMobile implements ClientModInitializer {
         surfaceReported = true;
         LOGGER.info("[{}] surface {}x{}, blit x={} y={} w={} h={}",
                 MOD_ID, surfaceW, surfaceH, blitX, blitY, blitW, blitH);
+    }
+
+    /**
+     * Logs which framebuffer was bound when the background tried to paint.
+     *
+     * <p>Zero is the screen, which is the only safe target. Anything else is
+     * Minecraft's own framebuffer, and painting there covers the world - the
+     * failure seen twice already.
+     */
+    public static void noteFramebufferBinding(int binding) {
+        if (bindingReported) return;
+        bindingReported = true;
+        LOGGER.info("[{}] background: framebuffer {} bound ({})",
+                MOD_ID, binding, binding == 0 ? "screen, painting" : "not the screen, skipping");
     }
 
     public static boolean backgroundEnabled() {

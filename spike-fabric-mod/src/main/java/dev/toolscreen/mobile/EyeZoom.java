@@ -46,6 +46,9 @@ import java.nio.ByteBuffer;
  */
 public final class EyeZoom {
 
+    /** {@code GL_FRAMEBUFFER_BINDING}; not exposed by the GL11 bindings. */
+    private static final int GL_FRAMEBUFFER_BINDING = 0x8CA6;
+
     private static ByteBuffer pixelBuffer;
 
     /**
@@ -292,6 +295,19 @@ public final class EyeZoom {
 
         if (!ToolscreenMobile.backgroundEnabled()) return;
         if (realW < 2 || realH < 2) return;
+
+        // Only paint when the default framebuffer is bound.
+        //
+        // Twice now this fill has covered the game rather than the letterbox,
+        // and the likeliest reason is that at this point Minecraft's own
+        // framebuffer is still bound - so the gradient lands on top of the
+        // world, which is then blitted to the screen. Rather than assume either
+        // way, ask. If anything other than the screen is bound, paint nothing:
+        // a missing background is a cosmetic loss, painting over the world is
+        // not.
+        int boundFramebuffer = GL11.glGetInteger(GL_FRAMEBUFFER_BINDING);
+        ToolscreenMobile.noteFramebufferBinding(boundFramebuffer);
+        if (boundFramebuffer != 0) return;
 
         final int from = ToolscreenMobile.backgroundTop();
         final int to = ToolscreenMobile.backgroundBottom();
