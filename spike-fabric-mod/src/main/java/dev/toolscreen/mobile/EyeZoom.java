@@ -36,13 +36,27 @@ import java.nio.ByteBuffer;
  * frame, which is why only a small region is sampled and only while a mode that
  * asks for it is active.
  *
- * <h2>Why it is drawn inside the strip</h2>
+ * <h2>Where the sample comes from</h2>
  *
- * On Windows the panel sits beside the game window on the desktop. That is not
- * available here: the HUD is drawn inside Minecraft's framebuffer, which is the
- * strip itself, so nothing a mod draws can land in the black surround. The
- * panel therefore overlays the strip, and its defaults are sized to fit a
- * narrow one rather than copying the original's proportions.
+ * The read happens after Minecraft has blitted its render target to the screen,
+ * from inside the blit rectangle. Three things make that the right moment:
+ * the default framebuffer is definitely bound, so there is no guessing about
+ * what {@code glReadPixels} will read; the blit is 1:1, so one screen pixel
+ * there is one game pixel, which is what the ruler has to count; and those
+ * pixels were overwritten by the blit an instant earlier, so the panel cannot
+ * photograph itself.
+ *
+ * <p>That last point is not hypothetical. Sampling at the end of
+ * {@code GameRenderer.render} read the previous frame's screen rather than the
+ * render target, so the panel magnified its own ruler - pink cells and numbers
+ * blown up fifty times, with no terrain in sight.
+ *
+ * <h2>Where it is drawn</h2>
+ *
+ * In the letterbox beside the strip, like the original sits beside the game
+ * window on the desktop. The panel is fitted to the letterbox rather than
+ * placed at a configured fraction: a size that does not fit would otherwise
+ * cover the very thing being measured.
  */
 public final class EyeZoom {
 
@@ -80,64 +94,48 @@ public final class EyeZoom {
         Window window = client.getWindow();
         if (window == null) return;
 
-        boolean overrideActive = ToolscreenMobile.isOverrideActive();
+        // The in-strip variant, for when there is no letterbox to put the panel
+        // in. It draws the sample taken during the previous frame's blit, which
+        // is a frame behind; the alternative is reading Minecraft's render
+        // target while the HUD is being drawn into it, which is undefined.
+        if (ToolscreenMobile.eyeZoomActive() && !ToolscreenMobile.eyeZoomSide()) {
+            int[] pixels = lastPixels;
+            if (pixels != null) {
+                int zoomX = ToolscreenMobile.eyeZoomFactorX();
+                int zoomY = ToolscreenMobile.eyeZoomFactorY();
+                int panelW = lastRegionW * zoomX;
+                int panelH = lastRegionH * zoomY;
+                int panelX = (int) (window.getScaledWidth() * ToolscreenMobile.eyeZoomLeft()) - panelW / 2;
+                int panelY = (int) (window.getScaledHeight() * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
 
-        // Order matters. The pixels are read before anything of ours is drawn,
-        // because the sample is taken at the centre of the screen and our own
-        // crosshair sits exactly there: draw first and the magnifier shows a
-        // giant crosshair rather than the target.
-        if (ToolscreenMobile.eyeZoomActive()) {
-            int fbWidth = window.getFramebufferWidth();
-            int fbHeight = window.getFramebufferHeight();
-            int regionW = Math.min(ToolscreenMobile.eyeZoomRegionWidth(), fbWidth);
-            int regionH = Math.min(ToolscreenMobile.eyeZoomRegionHeight(), fbHeight);
-
-            if (regionW >= 2 && regionH >= 2) {
-                int[] pixels = readRegion(fbWidth, fbHeight, regionW, regionH);
-                if (pixels != null) {
-                    ToolscreenMobile.noteEyeZoomActive();
-                    lastPixels = pixels;
-                    lastRegionW = regionW;
-                    lastRegionH = regionH;
-
-                    if (!ToolscreenMobile.eyeZoomSide()) {
-                        int zoomX = ToolscreenMobile.eyeZoomFactorX();
-                        int zoomY = ToolscreenMobile.eyeZoomFactorY();
-                        int panelW = regionW * zoomX;
-                        int panelH = regionH * zoomY;
-                        int panelX = (int) (window.getScaledWidth() * ToolscreenMobile.eyeZoomLeft()) - panelW / 2;
-                        int panelY = (int) (window.getScaledHeight() * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
-
-                        drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoomX, zoomY);
-                        drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoomX, zoomY);
-                        drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoomX);
-                    }
-                }
+                drawPixels(matrices, pixels, lastRegionW, lastRegionH, panelX, panelY, zoomX, zoomY);
+                drawRuler(matrices, font, lastRegionW, panelX, panelY, panelH, zoomX, zoomY);
+                drawCentreLine(matrices, lastRegionW, panelX, panelY, panelH, zoomX);
             }
         }
 
-        // Drawn last, and only after sampling. Hiding the HUD takes the game's
-        // own crosshair with it, and a stretched screen is useless for aiming
-        // without one.
-        if (ToolscreenMobile.crosshairEnabled() && overrideActive) {
+        // Hiding the HUD takes the game's own crosshair with it, and a stretched
+        // screen is useless for aiming without one.
+        if (ToolscreenMobile.crosshairEnabled() && ToolscreenMobile.isOverrideActive()) {
             drawCrosshair(matrices, window);
         }
     }
 
     /**
-     * Reads a block of pixels centred on the crosshair.
+     * Reads the pixels around the crosshair out of the just-blitted strip.
      *
-     * <p>Coordinates are framebuffer space, whose origin is the bottom-left
-     * corner — the crosshair sits at the centre of the framebuffer Minecraft
-     * believes in, which is the overridden size, not the real surface.
-     *
-     * @return ARGB pixels in row-major order starting at the top row, or null
-     *         if the read could not be made
+     * <p>Coordinates are screen pixels with a bottom-left origin, which is the
+     * same convention {@code blitX}/{@code blitY} already use, so the centre of
+     * the strip is simply the centre of the blit rectangle.
      */
-    private static int[] readRegion(int fbWidth, int fbHeight, int regionW, int regionH) {
-        int x0 = (fbWidth - regionW) / 2;
-        int y0 = (fbHeight - regionH) / 2;
-        if (x0 < 0 || y0 < 0) return null;
+    private static void sampleFromScreen(int blitX, int blitY, int blitW, int blitH) {
+        int regionW = Math.min(ToolscreenMobile.eyeZoomRegionWidth(), blitW);
+        int regionH = Math.min(ToolscreenMobile.eyeZoomRegionHeight(), blitH);
+        if (regionW < 2 || regionH < 2) return;
+
+        int x0 = blitX + (blitW - regionW) / 2;
+        int y0 = blitY + (blitH - regionH) / 2;
+        if (x0 < 0 || y0 < 0) return;
 
         int needed = regionW * regionH * 4;
         if (pixelBuffer == null || pixelBuffer.capacity() < needed) {
@@ -159,7 +157,11 @@ public final class EyeZoom {
                 out[row * regionW + col] = 0xFF000000 | (r << 16) | (g << 8) | b;
             }
         }
-        return out;
+
+        ToolscreenMobile.noteEyeZoomActive();
+        lastPixels = out;
+        lastRegionW = regionW;
+        lastRegionH = regionH;
     }
 
     /**
@@ -264,19 +266,6 @@ public final class EyeZoom {
     }
 
     /**
-     * Draws the panel into the letterboxed area beside the strip.
-     *
-     * <p>Called after Minecraft has blitted its framebuffer to the screen, the
-     * one moment in the frame when the full surface is addressable: everything
-     * drawn earlier goes into Minecraft's own framebuffer, which <em>is</em>
-     * the strip, so it can never reach the black.
-     *
-     * <p>Sets up a viewport and orthographic projection covering the whole
-     * surface, mirroring the sequence Minecraft itself uses a few lines
-     * earlier, then restores both. Coordinates here are real screen pixels,
-     * not GUI units, because outside the strip there is no GUI scale.
-     */
-    /**
      * Fills the letterboxed area around the strip, replacing the bare black.
      *
      * <p>The original does this too — its localization table carries
@@ -371,8 +360,36 @@ public final class EyeZoom {
         }
     }
 
+    /**
+     * Samples the strip and draws the magnifier into the letterbox beside it.
+     *
+     * <p>Called once Minecraft has blitted its framebuffer to the screen, the
+     * one moment in the frame when the full surface is addressable: everything
+     * drawn earlier goes into Minecraft's own framebuffer, which <em>is</em>
+     * the strip, so it can never reach the black.
+     *
+     * <h2>Fitted, not positioned</h2>
+     *
+     * The panel used to be placed at a configured fraction of the screen at
+     * whatever size the zoom factors implied. Nothing checked that the result
+     * fit, and at a strong zoom it did not: a 30-pixel region at 56x is 1680
+     * pixels wide, which on a 2360-wide screen ran clear across the strip and
+     * off the far edge, hiding the thing being measured.
+     *
+     * <p>So the letterbox decides the size now. The zoom factors are treated as
+     * an upper bound and reduced until the panel fits beside the strip, which
+     * means no combination of settings can put the panel over the game. The
+     * wider of the two letterboxes is used, so this follows the strip when it
+     * is aligned left or right rather than centred.
+     */
     public static void renderSide(TextRenderer font, int blitX, int blitY, int blitW, int blitH) {
-        if (!ToolscreenMobile.eyeZoomSide() || !ToolscreenMobile.eyeZoomActive()) return;
+        if (!ToolscreenMobile.eyeZoomActive()) return;
+        if (blitW < 2 || blitH < 2) return;
+
+        // Sampled here rather than during the HUD pass: see the class comment.
+        sampleFromScreen(blitX, blitY, blitW, blitH);
+
+        if (!ToolscreenMobile.eyeZoomSide()) return;
 
         final int[] pixels = lastPixels;
         if (pixels == null) return;
@@ -383,12 +400,31 @@ public final class EyeZoom {
 
         final int regionW = lastRegionW;
         final int regionH = lastRegionH;
-        final int zoomX = ToolscreenMobile.eyeZoomFactorX();
-        final int zoomY = ToolscreenMobile.eyeZoomFactorY();
+        if (regionW < 2 || regionH < 2) return;
+
+        // The bands either side of the strip, in real screen pixels.
+        int leftBox = blitX;
+        int rightBox = realW - (blitX + blitW);
+        boolean useLeft = leftBox >= rightBox;
+        int boxStart = useLeft ? 0 : blitX + blitW;
+        int boxWidth = useLeft ? leftBox : rightBox;
+
+        int margin = Math.max(8, realW / 120);
+        int availW = boxWidth - 2 * margin;
+        int availH = realH - 2 * margin;
+        // Nothing worth drawing into - Native mode, or a strip so wide there is
+        // no surround. Skipping beats overlapping the game.
+        if (availW < regionW || availH < regionH) return;
+
+        final int zoomX = Math.min(ToolscreenMobile.eyeZoomFactorX(), availW / regionW);
+        final int zoomY = Math.min(ToolscreenMobile.eyeZoomFactorY(), availH / regionH);
+        if (zoomX < 1 || zoomY < 1) return;
+
         final int panelW = regionW * zoomX;
         final int panelH = regionH * zoomY;
-        final int panelX = (int) (realW * ToolscreenMobile.eyeZoomLeft()) - panelW / 2;
-        final int panelY = (int) (realH * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
+        final int panelX = boxStart + margin + (availW - panelW) / 2;
+        final int panelY = clamp((int) (realH * ToolscreenMobile.eyeZoomTop()) - panelH / 2,
+                margin, realH - margin - panelH);
 
         withFullSurface(blitX, blitY, blitW, blitH, () -> {
             MatrixStack matrices = new MatrixStack();
@@ -396,5 +432,10 @@ public final class EyeZoom {
             drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoomX, zoomY);
             drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoomX);
         });
+    }
+
+    private static int clamp(int value, int min, int max) {
+        if (max < min) return min;
+        return Math.max(min, Math.min(max, value));
     }
 }

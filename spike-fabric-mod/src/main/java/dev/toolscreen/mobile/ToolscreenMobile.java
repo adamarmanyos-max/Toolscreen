@@ -73,25 +73,27 @@ public final class ToolscreenMobile implements ClientModInitializer {
     // Per-mode, matching the Windows tool, where the EyeZoom settings live
     // under Modes rather than as a global toggle.
     private static volatile List<String> eyeZoomModes = List.of("Eye Measure");
-    // Sized for a narrow strip. In Eye Measure the strip is only ~190 real
-    // pixels wide, and Minecraft picks GUI scale 1 at that width, so one GUI
-    // unit is one real pixel: a zoom of 6 meant six real pixels per game pixel,
-    // far too fine to count. 10 with a smaller region keeps the panel inside
-    // the strip while making each pixel legible.
-    // Proportioned from screenshots of the Windows tool: a panel roughly 30
-    // pixels across and taller than it is wide, with the ruler labelling the
-    // central 24 rather than the full width. Sized for the letterbox, which is
-    // over a thousand pixels wide on an iPad - far more room than the strip.
-    private static volatile int eyeZoomRegionWidth = 30;
-    private static volatile int eyeZoomRegionHeight = 24;
+    // How many game pixels are magnified, and how far each one is blown up.
+    //
+    // The two are a budget, not independent settings: region times factor is
+    // the panel size, and the panel has to fit the letterbox beside the strip.
+    // On an iPad in Eye Measure that band is around 1050 pixels wide, so 20
+    // pixels at 50x fills it almost exactly. Asking for more of both is what
+    // produced a panel 1680 wide that ran straight across the game; EyeZoom now
+    // reduces the factors until the panel fits, so these are an upper bound
+    // rather than a promise.
+    private static volatile int eyeZoomRegionWidth = 20;
+    private static volatile int eyeZoomRegionHeight = 16;
 
     // Separate horizontal and vertical magnification, as the original has:
     // its strings carry clone_width and clone_height independently. The stretch
     // runs along X - each game pixel is drawn wider than it is tall, which
     // suits a ruler that counts horizontal offsets.
-    private static volatile int eyeZoomFactorX = 56;
-    private static volatile int eyeZoomFactorY = 28;
-    private static volatile int eyeZoomRulerMax = 12;
+    private static volatile int eyeZoomFactorX = 50;
+    private static volatile int eyeZoomFactorY = 32;
+    // The widest offset the ruler labels. Beyond half the region there are no
+    // pixels left to label, so this tracks eyeZoomRegionWidth / 2.
+    private static volatile int eyeZoomRulerMax = 10;
     // Just below the crosshair rather than up in the sky: close enough to read
     // without moving your eye far, clear of the centre region being sampled.
     // Centred in the left letterbox band, matching where the Windows tool puts
