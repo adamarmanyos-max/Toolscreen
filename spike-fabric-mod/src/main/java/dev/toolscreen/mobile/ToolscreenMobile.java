@@ -83,8 +83,15 @@ public final class ToolscreenMobile implements ClientModInitializer {
     // central 24 rather than the full width. Sized for the letterbox, which is
     // over a thousand pixels wide on an iPad - far more room than the strip.
     private static volatile int eyeZoomRegionWidth = 30;
-    private static volatile int eyeZoomRegionHeight = 36;
-    private static volatile int eyeZoomFactor = 22;
+    private static volatile int eyeZoomRegionHeight = 24;
+
+    // Separate horizontal and vertical magnification, as the original has:
+    // its strings carry clone_width and clone_height independently. Measuring
+    // its screenshots, a ruler cell is about 22px wide while a pixel row is
+    // about 45px tall, so each game pixel is drawn roughly twice as tall as it
+    // is wide. Square pixels here looked visibly unlike it.
+    private static volatile int eyeZoomFactorX = 28;
+    private static volatile int eyeZoomFactorY = 56;
     private static volatile int eyeZoomRulerMax = 12;
     // Just below the crosshair rather than up in the sky: close enough to read
     // without moving your eye far, clear of the centre region being sampled.
@@ -165,8 +172,12 @@ public final class ToolscreenMobile implements ClientModInitializer {
         return eyeZoomRegionHeight;
     }
 
-    public static int eyeZoomFactor() {
-        return eyeZoomFactor;
+    public static int eyeZoomFactorX() {
+        return eyeZoomFactorX;
+    }
+
+    public static int eyeZoomFactorY() {
+        return eyeZoomFactorY;
     }
 
     public static int eyeZoomRulerMax() {
@@ -210,8 +221,9 @@ public final class ToolscreenMobile implements ClientModInitializer {
     public static void noteEyeZoomActive() {
         if (eyeZoomReported) return;
         eyeZoomReported = true;
-        LOGGER.info("[{}] eyezoom drawing: region {}x{} at {}x zoom, ruler +/-{}",
-                MOD_ID, eyeZoomRegionWidth, eyeZoomRegionHeight, eyeZoomFactor, eyeZoomRulerMax);
+        LOGGER.info("[{}] eyezoom drawing: region {}x{} at {}x{} zoom, ruler +/-{}",
+                MOD_ID, eyeZoomRegionWidth, eyeZoomRegionHeight,
+                eyeZoomFactorX, eyeZoomFactorY, eyeZoomRulerMax);
     }
 
     /** Real surface width, before any mode override. */
@@ -369,7 +381,15 @@ public final class ToolscreenMobile implements ClientModInitializer {
         eyeZoomModes = parseNameList(props.getProperty("eyezoomModes"), eyeZoomModes);
         eyeZoomRegionWidth = clampInt(props.getProperty("eyezoomRegionWidth"), eyeZoomRegionWidth, 2, 256);
         eyeZoomRegionHeight = clampInt(props.getProperty("eyezoomRegionHeight"), eyeZoomRegionHeight, 2, 256);
-        eyeZoomFactor = clampInt(props.getProperty("eyezoomFactor"), eyeZoomFactor, 1, 64);
+        // eyezoomFactor stays as a single-value shorthand: it sets both axes,
+        // and the per-axis keys override it if also present.
+        int both = clampInt(props.getProperty("eyezoomFactor"), 0, 0, 256);
+        if (both > 0) {
+            eyeZoomFactorX = both;
+            eyeZoomFactorY = both;
+        }
+        eyeZoomFactorX = clampInt(props.getProperty("eyezoomFactorX"), eyeZoomFactorX, 1, 256);
+        eyeZoomFactorY = clampInt(props.getProperty("eyezoomFactorY"), eyeZoomFactorY, 1, 256);
         eyeZoomRulerMax = clampInt(props.getProperty("eyezoomRulerMax"), eyeZoomRulerMax, 1, 128);
         eyeZoomTop = clampDouble(props.getProperty("eyezoomTop"), eyeZoomTop, 0.0, 1.0);
         eyeZoomLeft = clampDouble(props.getProperty("eyezoomLeft"), eyeZoomLeft, 0.0, 1.0);
@@ -481,7 +501,8 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("eyezoomModes", String.join(", ", eyeZoomModes));
         props.setProperty("eyezoomRegionWidth", Integer.toString(eyeZoomRegionWidth));
         props.setProperty("eyezoomRegionHeight", Integer.toString(eyeZoomRegionHeight));
-        props.setProperty("eyezoomFactor", Integer.toString(eyeZoomFactor));
+        props.setProperty("eyezoomFactorX", Integer.toString(eyeZoomFactorX));
+        props.setProperty("eyezoomFactorY", Integer.toString(eyeZoomFactorY));
         props.setProperty("eyezoomRulerMax", Integer.toString(eyeZoomRulerMax));
         props.setProperty("eyezoomTop", Double.toString(eyeZoomTop));
         props.setProperty("eyezoomLeft", Double.toString(eyeZoomLeft));

@@ -101,15 +101,16 @@ public final class EyeZoom {
                     lastRegionH = regionH;
 
                     if (!ToolscreenMobile.eyeZoomSide()) {
-                        int zoom = ToolscreenMobile.eyeZoomFactor();
-                        int panelW = regionW * zoom;
-                        int panelH = regionH * zoom;
+                        int zoomX = ToolscreenMobile.eyeZoomFactorX();
+                        int zoomY = ToolscreenMobile.eyeZoomFactorY();
+                        int panelW = regionW * zoomX;
+                        int panelH = regionH * zoomY;
                         int panelX = (int) (window.getScaledWidth() * ToolscreenMobile.eyeZoomLeft()) - panelW / 2;
                         int panelY = (int) (window.getScaledHeight() * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
 
-                        drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoom);
-                        drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoom);
-                        drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoom);
+                        drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoomX, zoomY);
+                        drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoomX, zoomY);
+                        drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoomX);
                     }
                 }
             }
@@ -173,10 +174,10 @@ public final class EyeZoom {
      * identical, just fewer calls.
      */
     private static void drawPixels(MatrixStack matrices, int[] pixels, int regionW, int regionH,
-                                   int panelX, int panelY, int zoom) {
+                                   int panelX, int panelY, int zoomX, int zoomY) {
         for (int row = 0; row < regionH; row++) {
             int rowStart = row * regionW;
-            int y = panelY + row * zoom;
+            int y = panelY + row * zoomY;
             int col = 0;
             while (col < regionW) {
                 int colour = pixels[rowStart + col];
@@ -184,8 +185,8 @@ public final class EyeZoom {
                 while (col + run < regionW && pixels[rowStart + col + run] == colour) {
                     run++;
                 }
-                int x = panelX + col * zoom;
-                DrawableHelper.fill(matrices, x, y, x + run * zoom, y + zoom, colour);
+                int x = panelX + col * zoomX;
+                DrawableHelper.fill(matrices, x, y, x + run * zoomX, y + zoomY, colour);
                 col += run;
             }
         }
@@ -196,20 +197,20 @@ public final class EyeZoom {
      * alternating colours so a long run stays countable.
      */
     private static void drawRuler(MatrixStack matrices, TextRenderer font, int regionW,
-                                  int panelX, int panelY, int panelH, int zoom) {
+                                  int panelX, int panelY, int panelH, int zoomX, int zoomY) {
         int centreCol = regionW / 2;
-        int rulerY = panelY + panelH / 2 - zoom / 2;
+        int rulerY = panelY + panelH / 2 - zoomY / 2;
         int max = ToolscreenMobile.eyeZoomRulerMax();
 
         for (int col = 0; col < regionW; col++) {
             int offset = col < centreCol ? centreCol - col : col - centreCol + 1;
             if (offset > max) continue;
 
-            int x = panelX + col * zoom;
+            int x = panelX + col * zoomX;
             int colour = (offset % 2 == 0) ? 0xFFADD8E6 : 0xFFFFC0CB;
-            DrawableHelper.fill(matrices, x, rulerY, x + zoom, rulerY + zoom, colour);
+            DrawableHelper.fill(matrices, x, rulerY, x + zoomX, rulerY + zoomY, colour);
             // Hairline between cells, so a long run stays countable by eye.
-            DrawableHelper.fill(matrices, x, rulerY, x + 1, rulerY + zoom, 0x40000000);
+            DrawableHelper.fill(matrices, x, rulerY, x + 1, rulerY + zoomY, 0x40000000);
 
             String label = Integer.toString(offset);
             int labelWidth = font.getWidth(label);
@@ -219,14 +220,14 @@ public final class EyeZoom {
             // zoom varies hugely: single figures inside the strip, tens out in
             // the letterbox. A fixed size is either unreadable at one end or
             // overflows at the other.
-            float scale = Math.min(2.5F, Math.max(0.5F, (zoom * 0.8F) / labelWidth));
+            float scale = Math.min(3.0F, Math.max(0.5F, (zoomX * 0.8F) / labelWidth));
 
             matrices.push();
             matrices.scale(scale, scale, 1.0F);
             font.draw(matrices,
                     label,
-                    (x + zoom / 2f) / scale - labelWidth / 2f,
-                    (rulerY + zoom / 2f) / scale - font.fontHeight / 2f,
+                    (x + zoomX / 2f) / scale - labelWidth / 2f,
+                    (rulerY + zoomY / 2f) / scale - font.fontHeight / 2f,
                     0xFF000000);
             matrices.pop();
         }
@@ -257,8 +258,8 @@ public final class EyeZoom {
 
     /** The reference axis: the boundary between the two centre pixels. */
     private static void drawCentreLine(MatrixStack matrices, int regionW,
-                                       int panelX, int panelY, int panelH, int zoom) {
-        int x = panelX + (regionW / 2) * zoom;
+                                       int panelX, int panelY, int panelH, int zoomX) {
+        int x = panelX + (regionW / 2) * zoomX;
         DrawableHelper.fill(matrices, x, panelY, x + 1, panelY + panelH, 0xFFFFFFFF);
     }
 
@@ -382,17 +383,18 @@ public final class EyeZoom {
 
         final int regionW = lastRegionW;
         final int regionH = lastRegionH;
-        final int zoom = ToolscreenMobile.eyeZoomFactor();
-        final int panelW = regionW * zoom;
-        final int panelH = regionH * zoom;
+        final int zoomX = ToolscreenMobile.eyeZoomFactorX();
+        final int zoomY = ToolscreenMobile.eyeZoomFactorY();
+        final int panelW = regionW * zoomX;
+        final int panelH = regionH * zoomY;
         final int panelX = (int) (realW * ToolscreenMobile.eyeZoomLeft()) - panelW / 2;
         final int panelY = (int) (realH * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
 
         withFullSurface(blitX, blitY, blitW, blitH, () -> {
             MatrixStack matrices = new MatrixStack();
-            drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoom);
-            drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoom);
-            drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoom);
+            drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoomX, zoomY);
+            drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoomX, zoomY);
+            drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoomX);
         });
     }
 }
