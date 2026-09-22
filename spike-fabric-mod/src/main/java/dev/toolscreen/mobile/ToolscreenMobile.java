@@ -27,6 +27,20 @@ import java.util.Properties;
 public final class ToolscreenMobile implements ClientModInitializer {
 
     public static final String MOD_ID = "toolscreen-mobile";
+
+    /**
+     * Bumped whenever this build's tuned defaults should replace a config file
+     * written by an older one.
+     *
+     * <p>The file is written once and then read forever, which quietly pinned
+     * every device to the defaults of whichever build happened to create it -
+     * so a rebuild with better numbers changed nothing, and the reason was
+     * invisible from a screenshot. An older file is now replaced rather than
+     * obeyed. That does discard hand edits, which is the right trade while
+     * these numbers are still being fitted against the original screenshot by
+     * screenshot; it stops once the shape settles.
+     */
+    private static final int CONFIG_VERSION = 2;
     private static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
     /**
@@ -77,23 +91,28 @@ public final class ToolscreenMobile implements ClientModInitializer {
     //
     // The two are a budget, not independent settings: region times factor is
     // the panel size, and the panel has to fit the letterbox beside the strip.
-    // On an iPad in Eye Measure that band is around 1050 pixels wide, so 20
-    // pixels at 50x fills it almost exactly. Asking for more of both is what
-    // produced a panel 1680 wide that ran straight across the game; EyeZoom now
-    // reduces the factors until the panel fits, so these are an upper bound
-    // rather than a promise.
-    private static volatile int eyeZoomRegionWidth = 20;
-    private static volatile int eyeZoomRegionHeight = 16;
+    // On an iPad in Eye Measure that band is around 1050 pixels wide, so 24
+    // pixels at 34x fills it. Asking for more of both is what produced a panel
+    // 1680 wide that ran straight across the game; EyeZoom reduces the factors
+    // until the panel fits, so these are an upper bound rather than a promise.
+    //
+    // The region is far taller than it is wide because the original's panel is:
+    // measured off two of its screenshots it is 617x757 and 605x745, both about
+    // 0.81 wide for every unit tall. Ours was landscape, which is why it looked
+    // nothing like it however the colours were tuned.
+    private static volatile int eyeZoomRegionWidth = 24;
+    private static volatile int eyeZoomRegionHeight = 60;
 
     // Separate horizontal and vertical magnification, as the original has:
     // its strings carry clone_width and clone_height independently. The stretch
     // runs along X - each game pixel is drawn wider than it is tall, which
     // suits a ruler that counts horizontal offsets.
-    private static volatile int eyeZoomFactorX = 50;
-    private static volatile int eyeZoomFactorY = 32;
+    private static volatile int eyeZoomFactorX = 34;
+    private static volatile int eyeZoomFactorY = 17;
     // The widest offset the ruler labels. Beyond half the region there are no
-    // pixels left to label, so this tracks eyeZoomRegionWidth / 2.
-    private static volatile int eyeZoomRulerMax = 10;
+    // pixels left to label, so this tracks eyeZoomRegionWidth / 2. Twelve is
+    // also what the original labels in two of its screenshots.
+    private static volatile int eyeZoomRulerMax = 12;
     // Just below the crosshair rather than up in the sky: close enough to read
     // without moving your eye far, clear of the centre region being sampled.
     // Centred in the left letterbox band, matching where the Windows tool puts
@@ -124,6 +143,8 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile boolean surfaceReported;
     private static volatile boolean bindingReported;
     private static volatile boolean fovReported;
+    private static volatile boolean panelReported;
+    private static volatile boolean suppressReported;
     private static volatile boolean crosshairEnabled = true;
     private static volatile int crosshairSize = 3;
     private static volatile int crosshairGap = 2;
@@ -252,6 +273,29 @@ public final class ToolscreenMobile implements ClientModInitializer {
         fovReported = true;
         LOGGER.info("[{}] fov override: {} -> {} (scale {})",
                 MOD_ID, original, scaled, fovScale);
+    }
+
+    /**
+     * Logged once, the first time the side panel works out where to go.
+     *
+     * <p>Added because the fit-to-letterbox arithmetic produced a panel that
+     * covered the strip anyway. Which input was wrong could not be settled by
+     * reasoning about it, so the numbers are now on the record instead.
+     */
+    public static void notePanelGeometry(int realW, int realH, int blitX, int blitW,
+                                         int panelX, int panelY, int panelW, int panelH) {
+        if (panelReported) return;
+        panelReported = true;
+        LOGGER.info("[{}] panel: surface {}x{}, blit x={} w={}, panel x={} y={} {}x{}",
+                MOD_ID, realW, realH, blitX, blitW, panelX, panelY, panelW, panelH);
+    }
+
+    /** Logged once if the panel had to be dropped for overlapping the strip. */
+    public static void notePanelSuppressed(int panelX, int panelW, int blitX, int blitW) {
+        if (suppressReported) return;
+        suppressReported = true;
+        LOGGER.warn("[{}] panel suppressed: it spans {}..{} which overlaps the strip at {}..{}",
+                MOD_ID, panelX, panelX + panelW, blitX, blitX + blitW);
     }
 
     /** Real surface width, before any mode override. */
@@ -403,6 +447,15 @@ public final class ToolscreenMobile implements ClientModInitializer {
             return;
         }
 
+        int version = clampInt(props.getProperty("configVersion"), 0, 0, 10000);
+        if (version < CONFIG_VERSION) {
+            LOGGER.info("[{}] config at {} is version {}, this build expects {} - "
+                            + "replacing it with this build's defaults",
+                    MOD_ID, file, version, CONFIG_VERSION);
+            writeDefaultConfig(file);
+            return;
+        }
+
         toggleKey = KeyCodes.resolve(props.getProperty("toggleKey"), DEFAULT_TOGGLE_KEY);
         align = parseAlign(props.getProperty("align"), Align.CENTER);
 
@@ -542,6 +595,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("eyezoomLeft", Double.toString(eyeZoomLeft));
         props.setProperty("eyezoomSide", Boolean.toString(eyeZoomSide));
         props.setProperty("fovScale", Double.toString(fovScale));
+        props.setProperty("configVersion", Integer.toString(CONFIG_VERSION));
         props.setProperty("background", Boolean.toString(backgroundEnabled));
         props.setProperty("backgroundTop", String.format("#%06X", backgroundTop));
         props.setProperty("backgroundBottom", String.format("#%06X", backgroundBottom));

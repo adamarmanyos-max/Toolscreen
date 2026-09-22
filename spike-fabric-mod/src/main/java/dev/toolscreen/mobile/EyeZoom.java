@@ -79,6 +79,22 @@ public final class EyeZoom {
     private static int lastRegionW;
     private static int lastRegionH;
 
+    /**
+     * One panel per frame.
+     *
+     * <p>{@code drawInternal} is not guaranteed to run once a frame - shader
+     * chains and resource-reload overlays go through it too - and a second
+     * pass carries a different blit rectangle, so it places its panel
+     * somewhere else entirely. {@code GameRenderer.render} does run once a
+     * frame, so it arms the draw and the first blit afterwards consumes it.
+     *
+     * <p>Gated on {@code hookSeen} so that if the overlay injection ever
+     * fails to attach, the panel still draws rather than waiting forever for
+     * an arming call that never comes.
+     */
+    private static volatile boolean hookSeen;
+    private static volatile boolean armed;
+
     private EyeZoom() {
     }
 
@@ -90,6 +106,8 @@ public final class EyeZoom {
      */
     public static void render(MatrixStack matrices, MinecraftClient client, TextRenderer font) {
         ToolscreenMobile.noteOverlayHookFired();
+        hookSeen = true;
+        armed = true;
 
         Window window = client.getWindow();
         if (window == null) return;
@@ -109,7 +127,8 @@ public final class EyeZoom {
                 int panelY = (int) (window.getScaledHeight() * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
 
                 drawPixels(matrices, pixels, lastRegionW, lastRegionH, panelX, panelY, zoomX, zoomY);
-                drawRuler(matrices, font, lastRegionW, panelX, panelY, panelH, zoomX, zoomY);
+                drawRuler(matrices, font, lastRegionW, panelX, panelY, panelH, zoomX,
+                        clamp(zoomX, 12, Math.max(12, panelH / 6)));
                 drawCentreLine(matrices, lastRegionW, panelX, panelY, panelH, zoomX);
             }
         }
@@ -197,11 +216,18 @@ public final class EyeZoom {
     /**
      * The ruler: one cell per game pixel, numbered outward from the centre,
      * alternating colours so a long run stays countable.
+     *
+     * <p>Its height is its own, not a magnified pixel row. Measured off the
+     * original's screenshots the band is square to twice as tall as a cell is
+     * wide - 0.96, 1.52, 2.35 and 2.49 times across four of them - never
+     * shorter. Tying it to the vertical zoom made it half as tall as a cell is
+     * wide, which is the one proportion the original never shows, and it also
+     * meant a fine vertical zoom left no room for the numbers.
      */
     private static void drawRuler(MatrixStack matrices, TextRenderer font, int regionW,
-                                  int panelX, int panelY, int panelH, int zoomX, int zoomY) {
+                                  int panelX, int panelY, int panelH, int zoomX, int rulerH) {
         int centreCol = regionW / 2;
-        int rulerY = panelY + panelH / 2 - zoomY / 2;
+        int rulerY = panelY + panelH / 2 - rulerH / 2;
         int max = ToolscreenMobile.eyeZoomRulerMax();
 
         for (int col = 0; col < regionW; col++) {
@@ -210,26 +236,26 @@ public final class EyeZoom {
 
             int x = panelX + col * zoomX;
             int colour = (offset % 2 == 0) ? 0xFFADD8E6 : 0xFFFFC0CB;
-            DrawableHelper.fill(matrices, x, rulerY, x + zoomX, rulerY + zoomY, colour);
+            DrawableHelper.fill(matrices, x, rulerY, x + zoomX, rulerY + rulerH, colour);
             // Hairline between cells, so a long run stays countable by eye.
-            DrawableHelper.fill(matrices, x, rulerY, x + 1, rulerY + zoomY, 0x40000000);
+            DrawableHelper.fill(matrices, x, rulerY, x + 1, rulerY + rulerH, 0x40000000);
 
             String label = Integer.toString(offset);
             int labelWidth = font.getWidth(label);
             if (labelWidth <= 0) continue;
 
-            // Scaled to the cell rather than fixed. A cell is `zoom` wide, and
-            // zoom varies hugely: single figures inside the strip, tens out in
-            // the letterbox. A fixed size is either unreadable at one end or
-            // overflows at the other.
-            float scale = Math.min(3.0F, Math.max(0.5F, (zoomX * 0.8F) / labelWidth));
+            // Scaled to the cell rather than fixed, and bounded by the band's
+            // height as well as the cell's width so a two-digit number in a
+            // narrow cell still fits.
+            float scale = Math.min(rulerH * 0.7F / font.fontHeight,
+                    Math.max(0.5F, (zoomX * 0.8F) / labelWidth));
 
             matrices.push();
             matrices.scale(scale, scale, 1.0F);
             font.draw(matrices,
                     label,
                     (x + zoomX / 2f) / scale - labelWidth / 2f,
-                    (rulerY + zoomY / 2f) / scale - font.fontHeight / 2f,
+                    (rulerY + rulerH / 2f) / scale - font.fontHeight / 2f,
                     0xFF000000);
             matrices.pop();
         }
@@ -262,7 +288,9 @@ public final class EyeZoom {
     private static void drawCentreLine(MatrixStack matrices, int regionW,
                                        int panelX, int panelY, int panelH, int zoomX) {
         int x = panelX + (regionW / 2) * zoomX;
-        DrawableHelper.fill(matrices, x, panelY, x + 1, panelY + panelH, 0xFFFFFFFF);
+        // Two pixels wide: at these zooms a hairline all but vanished
+        // against the terrain, and this is the axis everything is read from.
+        DrawableHelper.fill(matrices, x - 1, panelY, x + 1, panelY + panelH, 0xFFFFFFFF);
     }
 
     /**
@@ -390,6 +418,10 @@ public final class EyeZoom {
         sampleFromScreen(blitX, blitY, blitW, blitH);
 
         if (!ToolscreenMobile.eyeZoomSide()) return;
+        if (hookSeen) {
+            if (!armed) return;
+            armed = false;
+        }
 
         final int[] pixels = lastPixels;
         if (pixels == null) return;
@@ -422,14 +454,34 @@ public final class EyeZoom {
 
         final int panelW = regionW * zoomX;
         final int panelH = regionH * zoomY;
-        final int panelX = boxStart + margin + (availW - panelW) / 2;
+        // Clamped into the band as well as centred in it. The centring above
+        // is only correct if blitX really is the left letterbox width; the
+        // clamp holds even when it is not.
+        final int panelX = useLeft
+                ? clamp(boxStart + margin + (availW - panelW) / 2, 0, blitX - panelW)
+                : clamp(boxStart + margin + (availW - panelW) / 2, blitX + blitW, realW - panelW);
         final int panelY = clamp((int) (realH * ToolscreenMobile.eyeZoomTop()) - panelH / 2,
                 margin, realH - margin - panelH);
+
+        ToolscreenMobile.notePanelGeometry(realW, realH, blitX, blitW, panelX, panelY, panelW, panelH);
+
+        // Last line of defence, and not a theoretical one: the arithmetic above
+        // already said the panel fits the letterbox, and it did not - measured
+        // off a screenshot the panel covered 219 of the strip's 220 pixels. So
+        // the inputs can be wrong, and the only honest response is to check the
+        // result rather than trust the derivation. Overlapping the strip hides
+        // the thing being measured, which is worse than showing no panel.
+        if (panelX < blitX + blitW && panelX + panelW > blitX) {
+            ToolscreenMobile.notePanelSuppressed(panelX, panelW, blitX, blitW);
+            return;
+        }
+
+        final int rulerH = clamp(zoomX, 12, Math.max(12, panelH / 6));
 
         withFullSurface(blitX, blitY, blitW, blitH, () -> {
             MatrixStack matrices = new MatrixStack();
             drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoomX, zoomY);
-            drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoomX, zoomY);
+            drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoomX, rulerH);
             drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoomX);
         });
     }
