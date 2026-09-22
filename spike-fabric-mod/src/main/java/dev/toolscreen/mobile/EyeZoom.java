@@ -1,502 +1,262 @@
 package dev.toolscreen.mobile;
 
+import com.mojang.blaze3d.platform.GlStateManager;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
+import net.minecraft.client.gl.Framebuffer;
 import net.minecraft.client.gui.DrawableHelper;
-import net.minecraft.client.util.Window;
 import net.minecraft.client.util.math.MatrixStack;
 import org.lwjgl.BufferUtils;
-import com.mojang.blaze3d.platform.GlStateManager;
 import org.lwjgl.opengl.GL11;
 
 import java.nio.ByteBuffer;
 
 /**
- * Toolscreen's EyeZoom, ported: a magnified clone of the pixels around the
- * crosshair, with a centre line and a ruler counting pixel offsets outward.
+ * Toolscreen's EyeZoom, ported: a magnified clone of the framebuffer pixels
+ * around the crosshair, with a centre divider and a ruler counting offsets.
  *
- * <p>The point is measurement, not looking at things. One ruler mark is
- * <strong>one rendered game pixel</strong> — the quantity Ninjabrain Bot wants
- * for its correction. The magnification exists only so those pixels can be
- * counted by eye. Marking anything else (screen pixels, say) would feed the
- * calculator a wrong number, which is worse than showing nothing.
+ * <h2>The one invariant</h2>
  *
- * <h2>How the clone is taken</h2>
+ * <strong>One ruler cell is one framebuffer pixel.</strong> The number read off
+ * this ruler goes into Ninjabrain Bot, which converts it to an angle using the
+ * render height; a cell that stood for anything else - a screen pixel, a
+ * fraction of one - would feed the calculator a wrong number while looking
+ * perfectly reasonable. So the horizontal magnification is not a setting. It is
+ * the ruler cell width, and {@link Layout} picks that as a whole number of
+ * pixels so every magnified column is identical.
  *
- * The obvious approach — sampling Minecraft's main render target as a texture —
- * is undefined behaviour here, because the HUD is being drawn into that very
- * target at the time. Doing it safely needs a scratch framebuffer, which is
- * exactly the kind of thing that cannot be verified from a build machine
- * against gl4es on iOS.
- *
- * <p>So instead the region is read back with {@code glReadPixels} and each
- * pixel is redrawn as a filled rectangle. That uses only core calls, and it
- * also happens to be what the original looks like: flat blocks of colour, one
- * per game pixel. The cost is a synchronous read stalling the pipeline each
- * frame, which is why only a small region is sampled and only while a mode that
- * asks for it is active.
+ * <p>Vertically nothing is magnified: one framebuffer row per panel row. The
+ * panel is the game's own view with the horizontal axis stretched and the
+ * vertical axis left alone, which is why terrain in it reads at the same height
+ * as terrain in the game window.
  *
  * <h2>Where the sample comes from</h2>
  *
- * The read happens after Minecraft has blitted its render target to the screen,
- * from inside the blit rectangle. Three things make that the right moment:
- * the default framebuffer is definitely bound, so there is no guessing about
- * what {@code glReadPixels} will read; the blit is 1:1, so one screen pixel
- * there is one game pixel, which is what the ruler has to count; and those
- * pixels were overwritten by the blit an instant earlier, so the panel cannot
- * photograph itself.
- *
- * <p>That last point is not hypothetical. Sampling at the end of
- * {@code GameRenderer.render} read the previous frame's screen rather than the
- * render target, so the panel magnified its own ruler - pink cells and numbers
- * blown up fifty times, with no terrain in sight.
- *
- * <h2>Where it is drawn</h2>
- *
- * In the letterbox beside the strip, like the original sits beside the game
- * window on the desktop. The panel is fitted to the letterbox rather than
- * placed at a configured fraction: a size that does not fit would otherwise
- * cover the very thing being measured.
+ * Minecraft's own framebuffer, bound explicitly for the read. That framebuffer
+ * is much taller than the screen - 16384 rows against 1940 - and only a crop of
+ * it is ever displayed, so sampling what the monitor shows would sample a
+ * different image from the one being measured. Binding it by hand also removes
+ * the guesswork: an earlier version read whatever happened to be bound and
+ * photographed the previous frame's screen, magnifying its own ruler.
  */
 public final class EyeZoom {
 
-    /** {@code GL_FRAMEBUFFER_BINDING}; not exposed by the GL11 bindings. */
+    /** {@code GL_FRAMEBUFFER}; not exposed by the GL11 bindings. */
+    private static final int GL_FRAMEBUFFER = 0x8D40;
+    /** {@code GL_FRAMEBUFFER_BINDING}. */
     private static final int GL_FRAMEBUFFER_BINDING = 0x8CA6;
+
+    private static final int RULER_BLUE = 0xFFADD8E6;
+    private static final int RULER_PINK = 0xFFFFC0CB;
+    private static final int DIVIDER = 0xFFFFFFFF;
 
     private static ByteBuffer pixelBuffer;
 
-    /**
-     * The most recent sample, kept so the side panel can be drawn later in the
-     * frame than it was taken.
-     *
-     * <p>The sample has to happen while Minecraft's own framebuffer is bound,
-     * before our crosshair goes down. The side panel is drawn after that
-     * framebuffer has been blitted to the screen, which is the only moment the
-     * letterboxed area is addressable. Those are different points in the frame,
-     * so the pixels are carried between them.
-     */
+    /** The most recent sample: {@code columns} wide, {@code rows} tall, ARGB, top row first. */
     private static int[] lastPixels;
-    private static int lastRegionW;
-    private static int lastRegionH;
-
-    /**
-     * One panel per frame.
-     *
-     * <p>{@code drawInternal} is not guaranteed to run once a frame - shader
-     * chains and resource-reload overlays go through it too - and a second
-     * pass carries a different blit rectangle, so it places its panel
-     * somewhere else entirely. {@code GameRenderer.render} does run once a
-     * frame, so it arms the draw and the first blit afterwards consumes it.
-     *
-     * <p>Gated on {@code hookSeen} so that if the overlay injection ever
-     * fails to attach, the panel still draws rather than waiting forever for
-     * an arming call that never comes.
-     */
-    private static volatile boolean hookSeen;
-    private static volatile boolean armed;
+    private static int lastColumns;
+    private static int lastRows;
 
     private EyeZoom() {
     }
 
     /**
-     * Draws the overlay, if the active mode asks for it.
+     * Samples the framebuffer around the crosshair.
      *
-     * @param matrices HUD matrix stack, in scaled GUI units
-     * @param font     the HUD's text renderer, for the ruler numbers
+     * <p>Called while Minecraft's framebuffer still holds the frame, before it
+     * is blitted and before anything of ours is drawn over it. The crosshair is
+     * drawn later, in the screen pass, precisely so that it cannot end up in
+     * this picture: it marks the pixel being measured, so it must never be part
+     * of the measurement.
      */
-    public static void render(MatrixStack matrices, MinecraftClient client, TextRenderer font) {
-        ToolscreenMobile.noteOverlayHookFired();
-        hookSeen = true;
-        armed = true;
+    public static void sample(MinecraftClient client, Layout layout) {
+        if (layout == null) return;
 
-        Window window = client.getWindow();
-        if (window == null) return;
+        Framebuffer framebuffer = client.getFramebuffer();
+        if (framebuffer == null) return;
 
-        // The in-strip variant, for when there is no letterbox to put the panel
-        // in. It draws the sample taken during the previous frame's blit, which
-        // is a frame behind; the alternative is reading Minecraft's render
-        // target while the HUD is being drawn into it, which is undefined.
-        if (ToolscreenMobile.eyeZoomActive() && !ToolscreenMobile.eyeZoomSide()) {
-            int[] pixels = lastPixels;
-            if (pixels != null) {
-                int zoomX = ToolscreenMobile.eyeZoomFactorX();
-                int zoomY = ToolscreenMobile.eyeZoomFactorY();
-                int panelW = lastRegionW * zoomX;
-                int panelH = lastRegionH * zoomY;
-                int panelX = (int) (window.getScaledWidth() * ToolscreenMobile.eyeZoomLeft()) - panelW / 2;
-                int panelY = (int) (window.getScaledHeight() * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
+        int fbWidth = framebuffer.textureWidth;
+        int fbHeight = framebuffer.textureHeight;
+        int columns = Math.min(layout.columns, fbWidth);
+        int stride = Math.max(1, ToolscreenMobile.verticalStride());
+        int rows = Math.min(layout.panelHeight * stride, fbHeight);
+        if (columns < 2 || rows < 2) return;
 
-                drawPixels(matrices, pixels, lastRegionW, lastRegionH, panelX, panelY, zoomX, zoomY);
-                drawRuler(matrices, font, lastRegionW, panelX, panelY, panelH, zoomX,
-                        clamp(zoomX, 12, Math.max(12, panelH / 6)));
-                drawCentreLine(matrices, lastRegionW, panelX, panelY, panelH, zoomX);
-            }
-        }
-
-    }
-
-    /**
-     * Reads the pixels around the crosshair out of the just-blitted strip.
-     *
-     * <p>Coordinates are screen pixels with a bottom-left origin, which is the
-     * same convention {@code blitX}/{@code blitY} already use, so the centre of
-     * the strip is simply the centre of the blit rectangle.
-     */
-    private static void sampleFromScreen(int blitX, int blitY, int blitW, int blitH) {
-        int regionW = Math.min(ToolscreenMobile.eyeZoomRegionWidth(), blitW);
-        int regionH = Math.min(ToolscreenMobile.eyeZoomRegionHeight(), blitH);
-        if (regionW < 2 || regionH < 2) return;
-
-        int x0 = blitX + (blitW - regionW) / 2;
-        int y0 = blitY + (blitH - regionH) / 2;
+        // Centred on the crosshair, which is the centre of the framebuffer.
+        // Integer halves on both axes so the boundary between the two middle
+        // columns is exactly the framebuffer's centre line - the same line the
+        // divider is drawn on.
+        int x0 = fbWidth / 2 - columns / 2;
+        int y0 = fbHeight / 2 - rows / 2;
         if (x0 < 0 || y0 < 0) return;
 
-        int needed = regionW * regionH * 4;
+        int needed = columns * rows * 4;
         if (pixelBuffer == null || pixelBuffer.capacity() < needed) {
             pixelBuffer = BufferUtils.createByteBuffer(needed);
         }
         pixelBuffer.clear();
 
-        GL11.glReadPixels(x0, y0, regionW, regionH, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, pixelBuffer);
+        int previous = GL11.glGetInteger(GL_FRAMEBUFFER_BINDING);
+        GlStateManager.bindFramebuffer(GL_FRAMEBUFFER, framebuffer.fbo);
+        GlStateManager.readPixels(x0, y0, columns, rows, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, pixelBuffer);
+        GlStateManager.bindFramebuffer(GL_FRAMEBUFFER, previous);
 
-        int[] out = new int[regionW * regionH];
-        for (int row = 0; row < regionH; row++) {
+        int outRows = rows / stride;
+        int[] out = new int[columns * outRows];
+        for (int row = 0; row < outRows; row++) {
             // glReadPixels returns rows bottom-up; flip so row 0 is the top.
-            int src = (regionH - 1 - row) * regionW * 4;
-            for (int col = 0; col < regionW; col++) {
-                int i = src + col * 4;
+            int source = (rows - 1 - row * stride) * columns * 4;
+            for (int col = 0; col < columns; col++) {
+                int i = source + col * 4;
                 int r = pixelBuffer.get(i) & 0xFF;
                 int g = pixelBuffer.get(i + 1) & 0xFF;
                 int b = pixelBuffer.get(i + 2) & 0xFF;
-                out[row * regionW + col] = 0xFF000000 | (r << 16) | (g << 8) | b;
+                out[row * columns + col] = 0xFF000000 | (r << 16) | (g << 8) | b;
             }
         }
 
         ToolscreenMobile.noteEyeZoomActive();
         lastPixels = out;
-        lastRegionW = regionW;
-        lastRegionH = regionH;
+        lastColumns = columns;
+        lastRows = outRows;
     }
 
     /**
-     * Each sampled pixel becomes one {@code zoom}-sized square.
+     * Draws the panel, the ruler, the divider and the crosshair.
      *
-     * <p>Horizontally adjacent pixels of the same colour are merged into a
-     * single rectangle first. At the sizes the original uses — around 30x36 —
-     * drawing one quad per pixel would be over a thousand draw calls every
-     * frame, which is a lot to ask of a translation layer on a tablet. Terrain
-     * is full of runs of identical colour, so this usually collapses to a small
-     * fraction of that, and it is exact rather than approximate: the output is
-     * identical, just fewer calls.
+     * <p>Called after the blit, the one moment in the frame when the whole
+     * surface can be drawn to: everything before it goes into Minecraft's
+     * framebuffer, which is the game window, so it could never reach the
+     * letterbox beside it.
      */
-    private static void drawPixels(MatrixStack matrices, int[] pixels, int regionW, int regionH,
-                                   int panelX, int panelY, int zoomX, int zoomY) {
-        for (int row = 0; row < regionH; row++) {
-            int rowStart = row * regionW;
-            int y = panelY + row * zoomY;
+    public static void render(MatrixStack matrices, Layout layout) {
+        if (layout == null) return;
+
+        int[] pixels = lastPixels;
+        if (pixels != null && lastColumns >= 2 && lastRows >= 1 && !layout.overlapsGame()) {
+            drawPixels(matrices, layout, pixels);
+            drawRuler(matrices, layout);
+            drawDivider(matrices, layout);
+        }
+
+        drawCrosshair(matrices, layout);
+    }
+
+    /**
+     * One rectangle per framebuffer pixel, horizontal runs merged.
+     *
+     * <p>Every column is {@code cellWidth} wide and every row one pixel tall, by
+     * construction rather than by rounding: a column that came out a pixel wider
+     * than its neighbour would put the ruler out of step with the image it is
+     * measuring.
+     */
+    private static void drawPixels(MatrixStack matrices, Layout layout, int[] pixels) {
+        int cell = layout.cellWidth;
+        int left = layout.pixelsX();
+        int top = layout.panelY;
+        int rows = Math.min(lastRows, layout.panelHeight);
+
+        for (int row = 0; row < rows; row++) {
+            int rowStart = row * lastColumns;
+            int y = top + row;
             int col = 0;
-            while (col < regionW) {
+            while (col < lastColumns) {
                 int colour = pixels[rowStart + col];
                 int run = 1;
-                while (col + run < regionW && pixels[rowStart + col + run] == colour) {
+                while (col + run < lastColumns && pixels[rowStart + col + run] == colour) {
                     run++;
                 }
-                int x = panelX + col * zoomX;
-                DrawableHelper.fill(matrices, x, y, x + run * zoomX, y + zoomY, colour);
+                int x = left + col * cell;
+                DrawableHelper.fill(matrices, x, y, x + run * cell, y + 1, colour);
                 col += run;
             }
         }
     }
 
     /**
-     * The ruler: one cell per game pixel, numbered outward from the centre,
-     * alternating colours so a long run stays countable.
+     * The ruler: one cell per framebuffer pixel, numbered outward from the
+     * divider, in a band of its own height across the middle of the panel.
      *
-     * <p>Its height is its own, not a magnified pixel row. Measured off the
-     * original's screenshots the band is square to twice as tall as a cell is
-     * wide - 0.96, 1.52, 2.35 and 2.49 times across four of them - never
-     * shorter. Tying it to the vertical zoom made it half as tall as a cell is
-     * wide, which is the one proportion the original never shows, and it also
-     * meant a fine vertical zoom left no room for the numbers.
+     * <p>Colours alternate strictly left to right across the whole run, not
+     * mirrored about the centre. Mirroring put the same colour on both cells
+     * marked 1, which merged them into one double-width block straddling the
+     * divider - the one place on the ruler where the eye most needs an edge.
      */
-    private static void drawRuler(MatrixStack matrices, TextRenderer font, int regionW,
-                                  int panelX, int panelY, int panelH, int zoomX, int rulerH) {
-        int centreCol = regionW / 2;
-        int rulerY = panelY + panelH / 2 - rulerH / 2;
-        int max = ToolscreenMobile.eyeZoomRulerMax();
+    private static void drawRuler(MatrixStack matrices, Layout layout) {
+        int cells = layout.rulerCells;
+        int half = cells / 2;
+        int cell = layout.cellWidth;
+        int y = layout.rulerY;
+        int height = layout.rulerHeight;
 
-        for (int col = 0; col < regionW; col++) {
-            int offset = col < centreCol ? centreCol - col : col - centreCol + 1;
-            if (offset > max) continue;
+        for (int i = 0; i < cells; i++) {
+            int x = layout.centreX + (i - half) * cell;
+            DrawableHelper.fill(matrices, x, y, x + cell, y + height,
+                    (i % 2 == 0) ? RULER_BLUE : RULER_PINK);
+            DrawableHelper.fill(matrices, x, y, x + 1, y + height, 0x40000000);
 
-            int x = panelX + col * zoomX;
-            int colour = (offset % 2 == 0) ? 0xFFADD8E6 : 0xFFFFC0CB;
-            DrawableHelper.fill(matrices, x, rulerY, x + zoomX, rulerY + rulerH, colour);
-            // Hairline between cells, so a long run stays countable by eye.
-            DrawableHelper.fill(matrices, x, rulerY, x + 1, rulerY + rulerH, 0x40000000);
-
-            String label = Integer.toString(offset);
-            int labelWidth = font.getWidth(label);
-            if (labelWidth <= 0) continue;
-
-            // Scaled to the cell rather than fixed, and bounded by the band's
-            // height as well as the cell's width so a two-digit number in a
-            // narrow cell still fits.
-            float scale = Math.min(rulerH * 0.7F / font.fontHeight,
-                    Math.max(0.5F, (zoomX * 0.8F) / labelWidth));
-
-            matrices.push();
-            matrices.scale(scale, scale, 1.0F);
-            font.draw(matrices,
-                    label,
-                    (x + zoomX / 2f) / scale - labelWidth / 2f,
-                    (rulerY + rulerH / 2f) / scale - font.fontHeight / 2f,
-                    0xFF000000);
-            matrices.pop();
+            String label = Integer.toString(i < half ? half - i : i - half + 1);
+            int scale = Digits.fitScale(label, cell - 2, height - 2);
+            int textX = x + (cell - Digits.width(label, scale)) / 2;
+            int textY = y + (height - Digits.height(scale)) / 2;
+            Digits.draw(matrices, label, textX, textY, scale, 0xFF000000);
         }
+    }
+
+    /** The reference axis: the boundary between the two middle framebuffer pixels. */
+    private static void drawDivider(MatrixStack matrices, Layout layout) {
+        DrawableHelper.fill(matrices, layout.centreX - 1, layout.panelY,
+                layout.centreX + 1, layout.panelY + layout.panelHeight, DIVIDER);
     }
 
     /**
      * A replacement for the vanilla crosshair, which is lost with the HUD.
      *
-     * <p>Drawn in the screen pass, over the blitted strip, and deliberately
-     * <em>after</em> the sample has been taken. Drawing it into Minecraft's
-     * framebuffer instead put it in the picture the magnifier then photographs:
-     * a screenshot showed its two vertical arms magnified into 110x73 white
-     * slabs above and below the centre, with the horizontal pair hidden under
-     * the ruler. The crosshair marks the pixel being measured, so it is the one
-     * thing that must never be part of the measurement.
-     *
-     * <p>Deliberately a thin plain cross rather than a copy of the vanilla
-     * texture: this one marks the exact centre pixel, which is the reference the
-     * ruler counts from. Sized in real pixels, scaled off the strip so it stays
-     * visible without swamping it.
+     * <p>Drawn over the game window in screen pixels, after the sample. A thin
+     * plain cross with a gap at the centre rather than a copy of the vanilla
+     * texture: the gap leaves the pixel being measured visible, and that pixel
+     * is the whole point.
      */
-    private static void drawCrosshair(MatrixStack matrices, int blitX, int blitY, int blitW, int blitH) {
+    private static void drawCrosshair(MatrixStack matrices, Layout layout) {
         if (!ToolscreenMobile.crosshairEnabled()) return;
 
-        int cx = blitX + blitW / 2;
-        int cy = blitY + blitH / 2;
-        int scale = Math.max(1, blitW / 64);
+        int cx = layout.gameX + layout.gameWidth / 2;
+        int cy = layout.gameY + layout.gameHeight / 2;
+        int scale = Math.max(1, layout.gameWidth / 64);
         int arm = ToolscreenMobile.crosshairSize() * scale;
         int gap = ToolscreenMobile.crosshairGap() * scale;
-        int thickness = Math.max(1, scale);
-        int colour = 0xFFFFFFFF;
+        int t = Math.max(1, scale);
 
-        // Four separate arms with a gap at the centre, rather than a solid
-        // plus. The gap leaves the exact pixel being measured visible, which a
-        // filled centre would cover - and that pixel is the whole point.
-        DrawableHelper.fill(matrices, cx - gap - arm, cy, cx - gap, cy + thickness, colour);
-        DrawableHelper.fill(matrices, cx + gap + thickness, cy, cx + gap + thickness + arm, cy + thickness, colour);
-        DrawableHelper.fill(matrices, cx, cy - gap - arm, cx + thickness, cy - gap, colour);
-        DrawableHelper.fill(matrices, cx, cy + gap + thickness, cx + thickness, cy + gap + thickness + arm, colour);
-    }
-
-    /** The reference axis: the boundary between the two centre pixels. */
-    private static void drawCentreLine(MatrixStack matrices, int regionW,
-                                       int panelX, int panelY, int panelH, int zoomX) {
-        int x = panelX + (regionW / 2) * zoomX;
-        // Two pixels wide: at these zooms a hairline all but vanished
-        // against the terrain, and this is the axis everything is read from.
-        DrawableHelper.fill(matrices, x - 1, panelY, x + 1, panelY + panelH, 0xFFFFFFFF);
+        DrawableHelper.fill(matrices, cx - gap - arm, cy, cx - gap, cy + t, DIVIDER);
+        DrawableHelper.fill(matrices, cx + gap + t, cy, cx + gap + t + arm, cy + t, DIVIDER);
+        DrawableHelper.fill(matrices, cx, cy - gap - arm, cx + t, cy - gap, DIVIDER);
+        DrawableHelper.fill(matrices, cx, cy + gap + t, cx + t, cy + gap + t + arm, DIVIDER);
     }
 
     /**
-     * Fills the letterboxed area around the strip, replacing the bare black.
+     * Fills the area around the game window, replacing the bare black.
      *
-     * <p>The original does this too — its localization table carries
-     * {@code modes.background}, {@code modes.bg_image_path} and
-     * {@code modes.color_stops} — so the colour behind the game is part of the
-     * tool rather than the desktop showing through.
-     *
-     * <p>Only the four bands around the blit are painted. Filling the whole
-     * surface would paint over the strip that was just drawn into it.
+     * <p>Painted before the blit, so the game is drawn over the top of it: a
+     * fill placed afterwards has to agree exactly with where the game landed,
+     * and when it did not it covered the game instead.
      */
-    public static void renderBackground(int blitX, int blitY, int blitW, int blitH) {
-        if (!ToolscreenMobile.isOverrideActive()) return;
-
-        int realW = ToolscreenMobile.nativeWidth();
-        int realH = ToolscreenMobile.nativeHeight();
-        ToolscreenMobile.noteSurfaceGeometry(realW, realH, blitX, blitY, blitW, blitH);
-
+    public static void renderBackground(MatrixStack matrices, Layout layout) {
         if (!ToolscreenMobile.backgroundEnabled()) return;
-        if (realW < 2 || realH < 2) return;
 
-        // Only paint when the default framebuffer is bound.
-        //
-        // Twice now this fill has covered the game rather than the letterbox,
-        // and the likeliest reason is that at this point Minecraft's own
-        // framebuffer is still bound - so the gradient lands on top of the
-        // world, which is then blitted to the screen. Rather than assume either
-        // way, ask. If anything other than the screen is bound, paint nothing:
-        // a missing background is a cosmetic loss, painting over the world is
-        // not.
-        int boundFramebuffer = GL11.glGetInteger(GL_FRAMEBUFFER_BINDING);
-        ToolscreenMobile.noteFramebufferBinding(boundFramebuffer);
-        if (boundFramebuffer != 0) return;
-
-        final int from = ToolscreenMobile.backgroundTop();
-        final int to = ToolscreenMobile.backgroundBottom();
-        final int w = realW;
-        final int h = realH;
-
-        // Painted across the whole surface, before Minecraft blits the strip
-        // over the top of it. The first attempt filled only the four bands
-        // around the strip, which meant the fill had to agree exactly with the
-        // blit's position and the surface size - get either wrong and it covers
-        // the game, which is what happened. Painting underneath cannot: the
-        // strip is drawn afterwards, so the worst a wrong number can do here is
-        // leave a band unpainted.
-        withFullSurface(blitX, blitY, blitW, blitH, () -> {
-            MatrixStack matrices = new MatrixStack();
-            int bands = 48;
-            for (int i = 0; i < bands; i++) {
-                int y0 = h * i / bands;
-                int y1 = h * (i + 1) / bands;
-                DrawableHelper.fill(matrices, 0, y0, w, y1, lerpColour(from, to, i / (float) (bands - 1)));
-            }
-        });
+        int from = ToolscreenMobile.backgroundTop();
+        int to = ToolscreenMobile.backgroundBottom();
+        int bands = 48;
+        for (int i = 0; i < bands; i++) {
+            int y0 = layout.screenHeight * i / bands;
+            int y1 = layout.screenHeight * (i + 1) / bands;
+            DrawableHelper.fill(matrices, 0, y0, layout.screenWidth, y1,
+                    lerpColour(from, to, i / (float) (bands - 1)));
+        }
     }
 
     private static int lerpColour(int from, int to, float t) {
-        int a = 0xFF;
         int r = (int) (((from >> 16) & 0xFF) + (((to >> 16) & 0xFF) - ((from >> 16) & 0xFF)) * t);
         int g = (int) (((from >> 8) & 0xFF) + (((to >> 8) & 0xFF) - ((from >> 8) & 0xFF)) * t);
         int b = (int) ((from & 0xFF) + ((to & 0xFF) - (from & 0xFF)) * t);
-        return (a << 24) | (r << 16) | (g << 8) | b;
-    }
-
-    /**
-     * Runs {@code body} with a viewport and projection covering the whole
-     * surface, restoring both afterwards.
-     */
-    private static void withFullSurface(int blitX, int blitY, int blitW, int blitH, Runnable body) {
-        int realW = ToolscreenMobile.nativeWidth();
-        int realH = ToolscreenMobile.nativeHeight();
-
-        GlStateManager.matrixMode(GL11.GL_PROJECTION);
-        GlStateManager.pushMatrix();
-        GlStateManager.loadIdentity();
-        GlStateManager.ortho(0.0D, realW, realH, 0.0D, 1000.0D, 3000.0D);
-        GlStateManager.matrixMode(GL11.GL_MODELVIEW);
-        GlStateManager.pushMatrix();
-        GlStateManager.loadIdentity();
-        GlStateManager.translatef(0.0F, 0.0F, -2000.0F);
-        GlStateManager.viewport(0, 0, realW, realH);
-
-        try {
-            body.run();
-        } finally {
-            GlStateManager.viewport(blitX, blitY, blitW, blitH);
-            GlStateManager.matrixMode(GL11.GL_MODELVIEW);
-            GlStateManager.popMatrix();
-            GlStateManager.matrixMode(GL11.GL_PROJECTION);
-            GlStateManager.popMatrix();
-            GlStateManager.matrixMode(GL11.GL_MODELVIEW);
-        }
-    }
-
-    /**
-     * Samples the strip and draws the magnifier into the letterbox beside it.
-     *
-     * <p>Called once Minecraft has blitted its framebuffer to the screen, the
-     * one moment in the frame when the full surface is addressable: everything
-     * drawn earlier goes into Minecraft's own framebuffer, which <em>is</em>
-     * the strip, so it can never reach the black.
-     *
-     * <h2>Fitted, not positioned</h2>
-     *
-     * The panel used to be placed at a configured fraction of the screen at
-     * whatever size the zoom factors implied. Nothing checked that the result
-     * fit, and at a strong zoom it did not: a 30-pixel region at 56x is 1680
-     * pixels wide, which on a 2360-wide screen ran clear across the strip and
-     * off the far edge, hiding the thing being measured.
-     *
-     * <p>So the letterbox decides the size now. The zoom factors are treated as
-     * an upper bound and reduced until the panel fits beside the strip, which
-     * means no combination of settings can put the panel over the game. The
-     * wider of the two letterboxes is used, so this follows the strip when it
-     * is aligned left or right rather than centred.
-     */
-    public static void renderSide(TextRenderer font, int blitX, int blitY, int blitW, int blitH) {
-        if (!ToolscreenMobile.eyeZoomActive()) return;
-        if (blitW < 2 || blitH < 2) return;
-
-        // Sampled here rather than during the HUD pass: see the class comment.
-        sampleFromScreen(blitX, blitY, blitW, blitH);
-
-        if (!ToolscreenMobile.eyeZoomSide()) return;
-        if (hookSeen) {
-            if (!armed) return;
-            armed = false;
-        }
-
-        final int[] pixels = lastPixels;
-        if (pixels == null) return;
-
-        int realW = ToolscreenMobile.nativeWidth();
-        int realH = ToolscreenMobile.nativeHeight();
-        if (realW < 2 || realH < 2) return;
-
-        final int regionW = lastRegionW;
-        final int regionH = lastRegionH;
-        if (regionW < 2 || regionH < 2) return;
-
-        // The bands either side of the strip, in real screen pixels.
-        int leftBox = blitX;
-        int rightBox = realW - (blitX + blitW);
-        boolean useLeft = leftBox >= rightBox;
-        int boxStart = useLeft ? 0 : blitX + blitW;
-        int boxWidth = useLeft ? leftBox : rightBox;
-
-        int margin = Math.max(8, realW / 120);
-        int availW = boxWidth - 2 * margin;
-        int availH = realH - 2 * margin;
-        // Nothing worth drawing into - Native mode, or a strip so wide there is
-        // no surround. Skipping beats overlapping the game.
-        if (availW < regionW || availH < regionH) return;
-
-        final int zoomX = Math.min(ToolscreenMobile.eyeZoomFactorX(), availW / regionW);
-        final int zoomY = Math.min(ToolscreenMobile.eyeZoomFactorY(), availH / regionH);
-        if (zoomX < 1 || zoomY < 1) return;
-
-        final int panelW = regionW * zoomX;
-        final int panelH = regionH * zoomY;
-        // Clamped into the band as well as centred in it. The centring above
-        // is only correct if blitX really is the left letterbox width; the
-        // clamp holds even when it is not.
-        final int panelX = useLeft
-                ? clamp(boxStart + margin + (availW - panelW) / 2, 0, blitX - panelW)
-                : clamp(boxStart + margin + (availW - panelW) / 2, blitX + blitW, realW - panelW);
-        final int panelY = clamp((int) (realH * ToolscreenMobile.eyeZoomTop()) - panelH / 2,
-                margin, realH - margin - panelH);
-
-        ToolscreenMobile.notePanelGeometry(realW, realH, blitX, blitW, panelX, panelY, panelW, panelH);
-
-        // Last line of defence, and not a theoretical one: the arithmetic above
-        // already said the panel fits the letterbox, and it did not - measured
-        // off a screenshot the panel covered 219 of the strip's 220 pixels. So
-        // the inputs can be wrong, and the only honest response is to check the
-        // result rather than trust the derivation. Overlapping the strip hides
-        // the thing being measured, which is worse than showing no panel.
-        if (panelX < blitX + blitW && panelX + panelW > blitX) {
-            ToolscreenMobile.notePanelSuppressed(panelX, panelW, blitX, blitW);
-            return;
-        }
-
-        final int rulerH = clamp(zoomX, 12, Math.max(12, panelH / 6));
-
-        withFullSurface(blitX, blitY, blitW, blitH, () -> {
-            MatrixStack matrices = new MatrixStack();
-            drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoomX, zoomY);
-            drawRuler(matrices, font, regionW, panelX, panelY, panelH, zoomX, rulerH);
-            drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoomX);
-            drawCrosshair(matrices, blitX, blitY, blitW, blitH);
-        });
-    }
-
-    private static int clamp(int value, int min, int max) {
-        if (max < min) return min;
-        return Math.max(min, Math.min(max, value));
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 }

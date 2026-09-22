@@ -50,8 +50,8 @@ public record Mode(String name, double width, double height) {
      * zero or odd framebuffer dimension makes Minecraft's render target
      * allocation misbehave.
      *
-     * <p>Clamped to the native size, since reporting a framebuffer larger than
-     * the real surface would place the blit partly off-screen.
+     * <p>A dimension larger than the screen is legitimate and expected: see
+     * {@link #resolve(int, double)}.
      */
     /**
      * Smallest render this will ask for, unless the surface itself is smaller.
@@ -65,12 +65,35 @@ public record Mode(String name, double width, double height) {
      */
     private static final int MIN_USEFUL_PIXELS = 64;
 
+    /**
+     * Largest framebuffer dimension that will be asked for.
+     *
+     * <p>Eye Measure renders far taller than the screen on purpose, so there is
+     * no clamp to the display any more - but there is still a hard ceiling,
+     * because the framebuffer is a texture and asking for more than the driver
+     * allows fails the allocation rather than degrading. The real limit is
+     * queried at runtime; this is only a sanity bound on what a config file may
+     * ask for.
+     */
+    public static final int MAX_PIXELS = 32768;
+
+    /**
+     * Converts one configured dimension into a concrete framebuffer size.
+     *
+     * <p>Deliberately <em>not</em> clamped to the screen. Measuring depends on
+     * the render being much taller than the display: with the field of view
+     * fixed, angle per pixel is the vertical field divided by the render
+     * height, so a 16384-pixel render resolves an offset roughly eight times
+     * more finely than a 1940-pixel one. The framebuffer is an off-screen
+     * texture and has no reason to fit the monitor; only the visible crop of it
+     * does.
+     */
     public static int resolve(int nativePixels, double value) {
         double raw = isFraction(value) ? nativePixels * value : value;
         int resolved = (int) Math.round(raw);
-        if (resolved > nativePixels) resolved = nativePixels;
 
-        int floor = Math.min(MIN_USEFUL_PIXELS, nativePixels);
+        if (resolved > MAX_PIXELS) resolved = MAX_PIXELS;
+        int floor = Math.min(MIN_USEFUL_PIXELS, Math.max(2, nativePixels));
         if (resolved < floor) resolved = floor;
 
         if (resolved % 2 != 0) resolved--;

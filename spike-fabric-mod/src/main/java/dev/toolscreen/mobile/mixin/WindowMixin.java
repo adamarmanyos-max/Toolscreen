@@ -1,5 +1,6 @@
 package dev.toolscreen.mobile.mixin;
 
+import dev.toolscreen.mobile.GlLimits;
 import dev.toolscreen.mobile.Mode;
 import dev.toolscreen.mobile.ToolscreenMobile;
 import net.minecraft.client.util.Window;
@@ -55,8 +56,10 @@ public abstract class WindowMixin {
         ToolscreenMobile.recordNativeSize(this.framebufferWidth, this.framebufferHeight);
         if (!ToolscreenMobile.isOverrideActive()) return;
         Mode mode = ToolscreenMobile.activeMode();
-        int width = mode.resolveWidth(ToolscreenMobile.nativeWidth());
-        ToolscreenMobile.recordReportedSize(width, mode.resolveHeight(ToolscreenMobile.nativeHeight()));
+        int width = GlLimits.clampTexture(mode.resolveWidth(ToolscreenMobile.nativeWidth()));
+        int height = GlLimits.clampTexture(mode.resolveHeight(ToolscreenMobile.nativeHeight()));
+        ToolscreenMobile.recordReportedSize(width, height);
+        ToolscreenMobile.recordRenderSize(width, height);
         cir.setReturnValue(width);
     }
 
@@ -65,7 +68,7 @@ public abstract class WindowMixin {
         ToolscreenMobile.recordNativeSize(this.framebufferWidth, this.framebufferHeight);
         if (!ToolscreenMobile.isOverrideActive()) return;
         Mode mode = ToolscreenMobile.activeMode();
-        cir.setReturnValue(mode.resolveHeight(ToolscreenMobile.nativeHeight()));
+        cir.setReturnValue(GlLimits.clampTexture(mode.resolveHeight(ToolscreenMobile.nativeHeight())));
     }
 
     // ---- GUI coordinate space ---------------------------------------------
@@ -84,14 +87,14 @@ public abstract class WindowMixin {
     @Inject(method = "getScaledWidth", at = @At("HEAD"), cancellable = true)
     private void toolscreen$overrideScaledWidth(CallbackInfoReturnable<Integer> cir) {
         if (!ToolscreenMobile.isOverrideActive() || this.scaleFactor <= 0) return;
-        int width = ToolscreenMobile.activeMode().resolveWidth(ToolscreenMobile.nativeWidth());
+        int width = GlLimits.clampTexture(ToolscreenMobile.activeMode().resolveWidth(ToolscreenMobile.nativeWidth()));
         cir.setReturnValue((int) Math.ceil(width / this.scaleFactor));
     }
 
     @Inject(method = "getScaledHeight", at = @At("HEAD"), cancellable = true)
     private void toolscreen$overrideScaledHeight(CallbackInfoReturnable<Integer> cir) {
         if (!ToolscreenMobile.isOverrideActive() || this.scaleFactor <= 0) return;
-        int height = ToolscreenMobile.activeMode().resolveHeight(ToolscreenMobile.nativeHeight());
+        int height = GlLimits.clampTexture(ToolscreenMobile.activeMode().resolveHeight(ToolscreenMobile.nativeHeight()));
         cir.setReturnValue((int) Math.ceil(height / this.scaleFactor));
     }
 }

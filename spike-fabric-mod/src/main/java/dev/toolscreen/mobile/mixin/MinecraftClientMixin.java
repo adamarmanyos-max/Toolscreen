@@ -1,5 +1,6 @@
 package dev.toolscreen.mobile.mixin;
 
+import dev.toolscreen.mobile.Measurement;
 import dev.toolscreen.mobile.ToolscreenMobile;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.InputUtil;
@@ -10,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Polls the mode-cycle key once per client tick.
+ * Polls the mode-cycle and measurement-report keys once per client tick.
  *
  * <p>Polling rather than using Fabric API's key-binding helper keeps this mod's
  * dependencies to loader + yarn, so there is no Fabric API version to pin
@@ -26,6 +27,9 @@ public abstract class MinecraftClientMixin {
 
     @Unique
     private boolean toolscreen$toggleWasDown;
+
+    @Unique
+    private boolean toolscreen$reportWasDown;
 
     @Inject(method = "tick", at = @At("HEAD"))
     private void toolscreen$pollModeKey(CallbackInfo ci) {
@@ -43,5 +47,12 @@ public abstract class MinecraftClientMixin {
             client.onResolutionChanged();
         }
         this.toolscreen$toggleWasDown = down;
+
+        boolean report = InputUtil.isKeyPressed(client.getWindow().getHandle(),
+                ToolscreenMobile.reportKey());
+        if (report && !this.toolscreen$reportWasDown) {
+            Measurement.report(client);
+        }
+        this.toolscreen$reportWasDown = report;
     }
 }
