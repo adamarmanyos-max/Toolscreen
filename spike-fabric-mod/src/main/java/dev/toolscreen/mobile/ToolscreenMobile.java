@@ -80,6 +80,9 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
     /** Prints the measurement check. Default M, which vanilla leaves unbound. */
     private static volatile int reportKey = 77;
+
+    /** Opens the settings menu. Default comma, which vanilla leaves unbound. */
+    private static volatile int menuKey = 44;
     private static volatile Align align = Align.CENTER;
 
     /**
@@ -254,6 +257,23 @@ public final class ToolscreenMobile implements ClientModInitializer {
         return crosshairScale;
     }
 
+    public static void setCropCentre(double value) {
+        cropCentre = Math.max(0.0, Math.min(1.0, value));
+    }
+
+    public static void setEyeZoomFactorX(int value) {
+        eyeZoomFactorX = Math.max(1, Math.min(256, value));
+    }
+
+    public static void setEyeZoomFactorY(int value) {
+        eyeZoomFactorY = Math.max(1, Math.min(256, value));
+    }
+
+    /** Writes the current settings back to the config file. */
+    public static void save() {
+        writeDefaultConfig(FabricLoader.getInstance().getConfigDir().resolve(MOD_ID + ".properties"));
+    }
+
     public static double cropCentre() {
         return cropCentre;
     }
@@ -387,6 +407,10 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
     public static int reportKey() {
         return reportKey;
+    }
+
+    public static int menuKey() {
+        return menuKey;
     }
 
     /**
@@ -635,6 +659,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
         toggleKey = KeyCodes.resolve(props.getProperty("toggleKey"), DEFAULT_TOGGLE_KEY);
         reportKey = KeyCodes.resolve(props.getProperty("reportKey"), reportKey);
+        menuKey = KeyCodes.resolve(props.getProperty("menuKey"), menuKey);
         align = parseAlign(props.getProperty("align"), Align.CENTER);
 
         crosshairEnabled = !"false".equalsIgnoreCase(String.valueOf(props.getProperty("crosshair")).trim());
@@ -781,6 +806,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("crosshairScale", Double.toString(crosshairScale));
         props.setProperty("cropCentre", Double.toString(cropCentre));
         props.setProperty("reportKey", KeyCodes.nameOf(reportKey, Integer.toString(reportKey)));
+        props.setProperty("menuKey", KeyCodes.nameOf(menuKey, Integer.toString(menuKey)));
         props.setProperty("configVersion", Integer.toString(CONFIG_VERSION));
         props.setProperty("background", Boolean.toString(backgroundEnabled));
         props.setProperty("backgroundTop", String.format("#%06X", backgroundTop));

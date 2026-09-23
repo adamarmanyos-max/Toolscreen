@@ -1,6 +1,7 @@
 package dev.toolscreen.mobile.mixin;
 
 import dev.toolscreen.mobile.Measurement;
+import dev.toolscreen.mobile.ToolscreenScreen;
 import dev.toolscreen.mobile.ToolscreenMobile;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.InputUtil;
@@ -11,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Polls the mode-cycle and measurement-report keys once per client tick.
+ * Polls the mode-cycle, measurement-report and settings-menu keys once per tick.
  *
  * <p>Polling rather than using Fabric API's key-binding helper keeps this mod's
  * dependencies to loader + yarn, so there is no Fabric API version to pin
@@ -31,10 +32,24 @@ public abstract class MinecraftClientMixin {
     @Unique
     private boolean toolscreen$reportWasDown;
 
+    @Unique
+    private boolean toolscreen$menuWasDown;
+
     @Inject(method = "tick", at = @At("HEAD"))
     private void toolscreen$pollModeKey(CallbackInfo ci) {
         MinecraftClient client = (MinecraftClient) (Object) this;
         if (client.getWindow() == null) return;
+
+        // Nothing fires while a screen is open. These are plain key codes rather
+        // than key bindings, so without this they would also trigger from the
+        // chat box and from this mod's own menu - a comma typed in chat would
+        // reopen it, and the toggle would cycle modes mid-sentence.
+        if (client.currentScreen != null) {
+            this.toolscreen$toggleWasDown = false;
+            this.toolscreen$reportWasDown = false;
+            this.toolscreen$menuWasDown = false;
+            return;
+        }
 
         boolean down = InputUtil.isKeyPressed(client.getWindow().getHandle(), ToolscreenMobile.toggleKey());
 
@@ -54,5 +69,12 @@ public abstract class MinecraftClientMixin {
             Measurement.report(client);
         }
         this.toolscreen$reportWasDown = report;
+
+        boolean menu = InputUtil.isKeyPressed(client.getWindow().getHandle(),
+                ToolscreenMobile.menuKey());
+        if (menu && !this.toolscreen$menuWasDown) {
+            client.openScreen(new ToolscreenScreen());
+        }
+        this.toolscreen$menuWasDown = menu;
     }
 }
