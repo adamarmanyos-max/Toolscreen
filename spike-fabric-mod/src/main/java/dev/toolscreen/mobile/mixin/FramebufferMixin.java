@@ -82,7 +82,17 @@ public abstract class FramebufferMixin {
         lastBlitW = width;
         lastBlitH = Math.min(height, screenH > 0 ? screenH : height);
 
-        int vy = screenH > 0 ? (screenH - height) / 2 : y;
+        // Which framebuffer row lands at the screen's centre. At the default
+        // that is the middle one, which is where the crosshair is; the setting
+        // exists because a driver that clamps this oversized viewport puts the
+        // crop somewhere else, and the result is a view cut off at one edge
+        // only rather than trimmed evenly.
+        int vy = y;
+        if (screenH > 0) {
+            int anchor = (int) Math.round(height * ToolscreenMobile.cropCentre());
+            vy = screenH / 2 - anchor;
+        }
+        ToolscreenMobile.noteCrop(screenH, height, vy);
         GlStateManager.viewport(stripX, vy, width, height);
     }
 

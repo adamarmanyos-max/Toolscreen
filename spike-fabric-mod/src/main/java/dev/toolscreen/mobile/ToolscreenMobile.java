@@ -102,6 +102,8 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile int renderWidth;
     private static volatile int renderHeight;
     private static volatile boolean maxTextureReported;
+    private static volatile boolean maxViewportReported;
+    private static volatile boolean cropReported;
     private static volatile boolean clampReported;
 
     // ---- EyeZoom ----------------------------------------------------------
@@ -187,6 +189,17 @@ public final class ToolscreenMobile implements ClientModInitializer {
      */
     private static volatile double crosshairScale = 1.0;
 
+    /**
+     * Which row of the framebuffer lands at the centre of the screen, as a
+     * fraction of its height.
+     *
+     * <p>0.5 is the crosshair, and is what a centred crop means. It is settable
+     * because a driver that clamps the oversized viewport moves the crop
+     * somewhere else, and the symptom - the view cut off at one edge only - then
+     * needs correcting on the device rather than in another build.
+     */
+    private static volatile double cropCentre = 0.5;
+
     /** Where the rendered area sits within the real screen. */
     public enum Align { LEFT, CENTER, RIGHT }
 
@@ -239,6 +252,24 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
     public static double crosshairScale() {
         return crosshairScale;
+    }
+
+    public static double cropCentre() {
+        return cropCentre;
+    }
+
+    /**
+     * Logged once: the crop actually asked for.
+     *
+     * <p>The arithmetic here is simple enough to be obviously right, and was,
+     * while the result on screen was still wrong - so the numbers handed to GL
+     * go on the record next to the limits above.
+     */
+    public static void noteCrop(int screenHeight, int renderHeight, int viewportY) {
+        if (cropReported) return;
+        cropReported = true;
+        LOGGER.info("[{}] crop: screen height {}, render height {}, viewport y {}",
+                MOD_ID, screenHeight, renderHeight, viewportY);
     }
 
     public static int crosshairGap() {
@@ -375,6 +406,18 @@ public final class ToolscreenMobile implements ClientModInitializer {
                 + "in Ninjabrain Bot", MOD_ID, width, height, height);
     }
 
+    /**
+     * Logged once: the viewport ceiling, which also bounds the render height.
+     *
+     * <p>Worth its own line because it is the limit that moves the crop rather
+     * than failing outright, and nothing else would show it.
+     */
+    public static void noteMaxViewport(int width, int height) {
+        if (maxViewportReported) return;
+        maxViewportReported = true;
+        LOGGER.info("[{}] GL_MAX_VIEWPORT_DIMS is {}x{}", MOD_ID, width, height);
+    }
+
     /** Logged once: the driver's texture ceiling, which bounds the render height. */
     public static void noteMaxTexture(int max) {
         if (maxTextureReported) return;
@@ -389,11 +432,12 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * either way, but the figure for Ninjabrain Bot is now the clamped one, and
      * using the configured one would be wrong by their ratio.
      */
-    public static void noteTextureClamp(int requested, int clamped) {
+    public static void noteSizeClamp(int requested, int clamped) {
         if (clampReported) return;
         clampReported = true;
-        LOGGER.warn("[{}] render size {} exceeds this GPU's texture limit; using {}. "
-                + "Enter {} in Ninjabrain Bot, not {}", MOD_ID, requested, clamped, clamped, requested);
+        LOGGER.warn("[{}] render size {} exceeds this GPU's texture or viewport limit; "
+                + "using {}. Enter {} in Ninjabrain Bot, not {}",
+                MOD_ID, requested, clamped, clamped, requested);
     }
 
     /** Real surface width, before any mode override. */
@@ -599,6 +643,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         crosshairVanilla = !"false".equalsIgnoreCase(
                 String.valueOf(props.getProperty("crosshairVanilla")).trim());
         crosshairScale = clampDouble(props.getProperty("crosshairScale"), crosshairScale, 0.1, 8.0);
+        cropCentre = clampDouble(props.getProperty("cropCentre"), cropCentre, 0.0, 1.0);
 
         eyeZoomModes = parseNameList(props.getProperty("eyezoomModes"), eyeZoomModes);
         eyeZoomRegionWidth = clampInt(props.getProperty("eyezoomRegionWidth"), eyeZoomRegionWidth, 2, 256);
@@ -734,6 +779,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("fovScale", Double.toString(fovScale));
         props.setProperty("crosshairVanilla", Boolean.toString(crosshairVanilla));
         props.setProperty("crosshairScale", Double.toString(crosshairScale));
+        props.setProperty("cropCentre", Double.toString(cropCentre));
         props.setProperty("reportKey", KeyCodes.nameOf(reportKey, Integer.toString(reportKey)));
         props.setProperty("configVersion", Integer.toString(CONFIG_VERSION));
         props.setProperty("background", Boolean.toString(backgroundEnabled));
