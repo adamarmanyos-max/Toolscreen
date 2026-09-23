@@ -40,7 +40,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * these numbers are still being fitted against the original screenshot by
      * screenshot; it stops once the shape settles.
      */
-    private static final int CONFIG_VERSION = 6;
+    private static final int CONFIG_VERSION = 7;
     static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
     /**
@@ -242,6 +242,22 @@ public final class ToolscreenMobile implements ClientModInitializer {
      */
     private static volatile double mainZoom = 8.0;
 
+    /**
+     * Overall magnification of the clone panel, on top of the per-axis factors.
+     *
+     * <p>Separate from those factors because they answer a different question.
+     * eyeZoomFactorX and Y set the panel's <em>shape</em> - how much wider than
+     * tall a framebuffer pixel is drawn, which is what makes the ruler legible
+     * along the axis it counts. This scales both together, so zooming the clone
+     * in or out does not disturb that shape. Without it, changing how much of
+     * the frame the panel shows meant moving two sliders and keeping their ratio
+     * by hand.
+     *
+     * <p>Because the panel is a fixed size, this decides how much fits inside
+     * it: lower shows more of the frame at a smaller scale, higher shows less.
+     */
+    private static volatile double cloneZoom = 1.0;
+
     /** Where the rendered area sits within the real screen. */
     public enum Align { LEFT, CENTER, RIGHT }
 
@@ -331,6 +347,24 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
     public static double panelAspect() {
         return panelAspect;
+    }
+
+    public static double cloneZoom() {
+        return cloneZoom;
+    }
+
+    public static void setCloneZoom(double value) {
+        cloneZoom = Math.max(0.1, Math.min(8.0, value));
+    }
+
+    /** Horizontal magnification actually used: the axis factor times the zoom. */
+    public static int effectiveZoomX() {
+        return Math.max(1, (int) Math.round(eyeZoomFactorX * cloneZoom));
+    }
+
+    /** Vertical magnification actually used. */
+    public static int effectiveZoomY() {
+        return Math.max(1, (int) Math.round(eyeZoomFactorY * cloneZoom));
     }
 
     public static double mainZoom() {
@@ -752,6 +786,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         crosshairScale = clampDouble(props.getProperty("crosshairScale"), crosshairScale, 0.1, 8.0);
         cropCentre = clampDouble(props.getProperty("cropCentre"), cropCentre, 0.0, 1.0);
         mainZoom = clampDouble(props.getProperty("mainZoom"), mainZoom, 1.0, 32.0);
+        cloneZoom = clampDouble(props.getProperty("cloneZoom"), cloneZoom, 0.1, 8.0);
         panelHeightFraction = clampDouble(props.getProperty("panelHeightFraction"), panelHeightFraction, 0.1, 1.0);
         panelAspect = clampDouble(props.getProperty("panelAspect"), panelAspect, 0.1, 4.0);
 
@@ -891,6 +926,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("crosshairScale", Double.toString(crosshairScale));
         props.setProperty("cropCentre", Double.toString(cropCentre));
         props.setProperty("mainZoom", Double.toString(mainZoom));
+        props.setProperty("cloneZoom", Double.toString(cloneZoom));
         props.setProperty("panelHeightFraction", Double.toString(panelHeightFraction));
         props.setProperty("panelAspect", Double.toString(panelAspect));
         props.setProperty("reportKey", KeyCodes.nameOf(reportKey, Integer.toString(reportKey)));

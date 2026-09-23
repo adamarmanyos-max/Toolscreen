@@ -140,9 +140,21 @@ public final class EyeZoom {
 
         int fbWidth = framebuffer.textureWidth;
         int fbHeight = framebuffer.textureHeight;
-        int regionW = Math.min(ToolscreenMobile.eyeZoomRegionWidth(), fbWidth);
-        int regionH = Math.min(ToolscreenMobile.eyeZoomRegionHeight(), fbHeight);
-        if (regionW < 2 || regionH < 2) return;
+        // Exactly enough of the frame to fill the panel at the current zoom.
+        //
+        // Derived rather than configured, because the panel is a fixed size: the
+        // zoom decides how much appears in it, so the sample has to follow the
+        // zoom or the two disagree. They did - the panel was asking for as many
+        // rows as it could draw while this returned a fixed sixty, so lowering
+        // the vertical zoom showed the same sixty rows drawn smaller instead of
+        // more of the eye. Sampling beyond the panel would only be cropped away.
+        int panelW = ToolscreenMobile.panelPixelWidth();
+        int panelH = ToolscreenMobile.panelPixelHeight();
+        if (panelW < 32 || panelH < 32) return;
+
+        int regionW = Math.min(columnsFor(panelW, ToolscreenMobile.effectiveZoomX()), fbWidth);
+        int regionH = Math.min(rowsFor(panelH, ToolscreenMobile.effectiveZoomY()), fbHeight);
+        if (regionW < 2 || regionH < 1) return;
 
         // Integer halves on both axes, so the boundary between the two middle
         // columns is exactly the framebuffer's centre line - the same line the
@@ -536,8 +548,8 @@ public final class EyeZoom {
             return;
         }
 
-        final int zoomX = Math.max(1, ToolscreenMobile.eyeZoomFactorX());
-        final int zoomY = Math.max(1, ToolscreenMobile.eyeZoomFactorY());
+        final int zoomX = ToolscreenMobile.effectiveZoomX();
+        final int zoomY = ToolscreenMobile.effectiveZoomY();
         final int rulerH = clamp(zoomX, 12, Math.max(12, panelH / 6));
 
         withFullSurface(blitX, blitY, blitW, blitH, () -> {

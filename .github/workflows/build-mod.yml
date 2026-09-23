@@ -38,9 +38,19 @@ jobs:
           java-version: '17'
           cache: gradle
 
+      # Errors are echoed again at the very end. Gradle prints them before a
+      # stack trace hundreds of lines long, which pushes them out of reach of a
+      # log tail - so the one part worth reading gets repeated last.
       - name: Build
         working-directory: spike-fabric-mod
-        run: ./gradlew build --stacktrace --no-daemon
+        run: |
+          set -o pipefail
+          ./gradlew build --stacktrace --no-daemon 2>&1 | tee /tmp/build.log || {
+            echo ""
+            echo "================ COMPILE ERRORS ================"
+            grep -E "error:|warning:|\.java:[0-9]+" /tmp/build.log | head -60
+            exit 1
+          }
 
       # Signature dump. The Mixin annotation processor only warns on selectors
       # it cannot map, so a wrong target compiles cleanly and fails at runtime.

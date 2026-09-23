@@ -38,6 +38,9 @@ public class ToolscreenScreen extends Screen {
     /** Upper bound of the main-screen zoom; the GPU's limits reduce it further. */
     private static final double MAX_MAIN_ZOOM = 16.0;
 
+    /** Rows of controls, so the block can be centred on the visible area. */
+    private static final int ROWS = 7;
+
     private static final int ROW_HEIGHT = 22;
     private static final int MAX_WIDGET_WIDTH = 200;
 
@@ -65,7 +68,7 @@ public class ToolscreenScreen extends Screen {
         // comment: using height / 2 would hide this menu whenever the crop is
         // the thing that needs fixing.
         int centre = (int) Math.round(this.height * ToolscreenMobile.cropCentre());
-        int y = centre - 3 * ROW_HEIGHT;
+        int y = firstRowY(centre);
 
         addButton(new CropSlider(left, y, widgetWidth, 20));
         y += ROW_HEIGHT;
@@ -83,6 +86,8 @@ public class ToolscreenScreen extends Screen {
 
         addButton(new MainZoomSlider(left, y, widgetWidth, 20));
         y += ROW_HEIGHT;
+        addButton(new CloneZoomSlider(left, y, widgetWidth, 20));
+        y += ROW_HEIGHT;
         addButton(new StretchSlider(left, y, widgetWidth, 20, true));
         y += ROW_HEIGHT;
         addButton(new StretchSlider(left, y, widgetWidth, 20, false));
@@ -95,6 +100,20 @@ public class ToolscreenScreen extends Screen {
         }));
         addButton(new ButtonWidget(left + half, y, half - 2, 20, new LiteralText("Done"),
                 b -> onClose()));
+    }
+
+    /** Top of the control block, centred on the row the crop shows. */
+    /**
+     * Slider position for a clone zoom. Static because it is needed to build the
+     * slider's initial value, which is a {@code super(...)} argument - and an
+     * instance method cannot be called before the supertype constructor runs.
+     */
+    private static double cloneZoomToSlider(double zoom) {
+        return Math.max(0.0, Math.min(1.0, Math.log(zoom) / Math.log(2.0) / 4.0 + 0.5));
+    }
+
+    private static int firstRowY(int centre) {
+        return centre - (ROWS * ROW_HEIGHT) / 2;
     }
 
     private void nudgeCrop(double delta) {
@@ -124,9 +143,9 @@ public class ToolscreenScreen extends Screen {
         int centre = (int) Math.round(this.height * ToolscreenMobile.cropCentre());
 
         String resolution = ToolscreenMobile.renderWidth() + "x" + ToolscreenMobile.renderHeight();
-        drawCentredLine(matrices, resolution, centre - 3 * ROW_HEIGHT - 10);
-        drawCentredLine(matrices, "Ninjabrain: " + ToolscreenMobile.renderHeight(),
-                centre - 3 * ROW_HEIGHT);
+        int top = firstRowY(centre);
+        drawCentredLine(matrices, resolution, top - 22);
+        drawCentredLine(matrices, "Ninjabrain: " + ToolscreenMobile.renderHeight(), top - 11);
 
         super.render(matrices, mouseX, mouseY, delta);
     }
@@ -207,6 +226,39 @@ public class ToolscreenScreen extends Screen {
                 client.onResolutionChanged();
             }
             updateMessage();
+        }
+    }
+
+    /**
+     * Overall magnification of the clone panel, both axes together.
+     *
+     * <p>The two sliders below set the panel's shape - how much wider than tall
+     * a framebuffer pixel is drawn. This scales both at once, so zooming in and
+     * out leaves that shape alone. The label shows the resulting cell size,
+     * since that is what the shape actually looks like once multiplied.
+     */
+    private class CloneZoomSlider extends SliderWidget {
+
+        CloneZoomSlider(int x, int y, int width, int height) {
+            super(x, y, width, height, new LiteralText(""),
+                    cloneZoomToSlider(ToolscreenMobile.cloneZoom()));
+            updateMessage();
+        }
+
+        /** 0.25x to 4x, laid out logarithmically so both halves get equal travel. */
+        private double zoom() {
+            return Math.pow(2.0, (this.value - 0.5) * 4.0);
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(new LiteralText(String.format("Clone zoom  %.2fx  (%dx%d)",
+                    zoom(), ToolscreenMobile.effectiveZoomX(), ToolscreenMobile.effectiveZoomY())));
+        }
+
+        @Override
+        protected void applyValue() {
+            ToolscreenMobile.setCloneZoom(zoom());
         }
     }
 
