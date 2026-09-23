@@ -41,7 +41,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * these numbers are still being fitted against the original screenshot by
      * screenshot; it stops once the shape settles.
      */
-    private static final int CONFIG_VERSION = 8;
+    private static final int CONFIG_VERSION = 9;
     static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
     /**
@@ -135,7 +135,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
     // its strings carry clone_width and clone_height independently. The stretch
     // runs along X - each game pixel is drawn wider than it is tall, which
     // suits a ruler that counts horizontal offsets.
-    private static volatile int eyeZoomFactorX = 34;
+    private static final int STRETCH_X = 64;
 
     // Far lower than the horizontal figure, and far lower than it used to be.
     // The panel is a fixed size now, so this decides how much of the frame fits
@@ -144,7 +144,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
     // helped because the rows simply were not sampled. Four fits the whole of it
     // with room either side, and the ruler counts horizontal offsets anyway, so
     // vertical magnification buys nothing the measurement needs.
-    private static volatile int eyeZoomFactorY = 4;
+    private static final int STRETCH_Y = 4;
 
     /**
      * The panel's size, as fractions of the screen, fixed regardless of zoom.
@@ -214,15 +214,17 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile double crosshairScale = 1.0;
 
     /**
-     * Which row of the framebuffer lands at the centre of the screen, as a
-     * fraction of its height.
+     * Which row of the framebuffer lands at the centre of the screen.
      *
-     * <p>0.5 is the crosshair, and is what a centred crop means. It is settable
-     * because a driver that clamps the oversized viewport moves the crop
-     * somewhere else, and the symptom - the view cut off at one edge only - then
-     * needs correcting on the device rather than in another build.
+     * <p>Fixed, and deliberately not 0.5. The crop should be centred and the
+     * arithmetic asks for centred, but on this hardware it lands elsewhere -
+     * three attempts to work out why from the symptom were all wrong, so the
+     * value was found by moving it until the view sat right. 0.327 is that
+     * value. It is a constant rather than a setting because it is a property of
+     * the fault, not a preference: an adjustable one only invites it being set
+     * to something that reads plausibly and measures wrongly.
      */
-    private static volatile double cropCentre = 0.5;
+    private static final double CROP_CENTRE = 0.327;
 
     /**
      * How much taller than the screen the game renders, in Eye Measure.
@@ -242,7 +244,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * <p>1.0 is vanilla. The ceiling is whatever the GPU's texture and viewport
      * limits allow, which {@link GlLimits} applies and logs.
      */
-    private static volatile double mainZoom = 8.0;
+    private static final double MAIN_ZOOM = 8.0;
 
     /**
      * Overall magnification of the clone panel, on top of the per-axis factors.
@@ -258,7 +260,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * <p>Because the panel is a fixed size, this decides how much fits inside
      * it: lower shows more of the frame at a smaller scale, higher shows less.
      */
-    private static volatile double cloneZoom = 1.0;
+    private static final double CLONE_ZOOM = 0.5;
 
     /**
      * Mouse sensitivity while a measuring mode is active, in Minecraft's own
@@ -330,17 +332,8 @@ public final class ToolscreenMobile implements ClientModInitializer {
         return crosshairScale;
     }
 
-    public static void setCropCentre(double value) {
-        cropCentre = Math.max(0.0, Math.min(1.0, value));
-    }
 
-    public static void setEyeZoomFactorX(int value) {
-        eyeZoomFactorX = Math.max(1, Math.min(256, value));
-    }
 
-    public static void setEyeZoomFactorY(int value) {
-        eyeZoomFactorY = Math.max(1, Math.min(256, value));
-    }
 
     /** Writes the current settings back to the config file. */
     public static void save() {
@@ -372,7 +365,9 @@ public final class ToolscreenMobile implements ClientModInitializer {
     }
 
     public static void setMeasureSensitivity(double value) {
-        measureSensitivity = Math.max(0.001, Math.min(1.0, value));
+        // No lower floor: Minecraft's own look speed has one built in, so a
+        // floor here would only stack a second, invisible one on top.
+        measureSensitivity = Math.max(0.0, Math.min(1.0, value));
     }
 
     /**
@@ -404,30 +399,24 @@ public final class ToolscreenMobile implements ClientModInitializer {
     }
 
     public static double cloneZoom() {
-        return cloneZoom;
+        return CLONE_ZOOM;
     }
 
-    public static void setCloneZoom(double value) {
-        cloneZoom = Math.max(0.1, Math.min(8.0, value));
-    }
 
     /** Horizontal magnification actually used: the axis factor times the zoom. */
     public static int effectiveZoomX() {
-        return Math.max(1, (int) Math.round(eyeZoomFactorX * cloneZoom));
+        return Math.max(1, (int) Math.round(STRETCH_X * CLONE_ZOOM));
     }
 
     /** Vertical magnification actually used. */
     public static int effectiveZoomY() {
-        return Math.max(1, (int) Math.round(eyeZoomFactorY * cloneZoom));
+        return Math.max(1, (int) Math.round(STRETCH_Y * CLONE_ZOOM));
     }
 
     public static double mainZoom() {
-        return mainZoom;
+        return MAIN_ZOOM;
     }
 
-    public static void setMainZoom(double value) {
-        mainZoom = Math.max(1.0, Math.min(32.0, value));
-    }
 
     /**
      * The framebuffer height for this mode: its own height, times the main zoom
@@ -440,12 +429,12 @@ public final class ToolscreenMobile implements ClientModInitializer {
     public static int resolveRenderHeight(Mode mode, int nativeHeight) {
         int base = mode.resolveHeight(nativeHeight);
         if (!eyeZoomActive()) return base;
-        long scaled = Math.round(base * mainZoom);
+        long scaled = Math.round(base * MAIN_ZOOM);
         return (int) Math.min(scaled, Mode.MAX_PIXELS);
     }
 
     public static double cropCentre() {
-        return cropCentre;
+        return CROP_CENTRE;
     }
 
     /**
@@ -475,11 +464,11 @@ public final class ToolscreenMobile implements ClientModInitializer {
     }
 
     public static int eyeZoomFactorX() {
-        return eyeZoomFactorX;
+        return STRETCH_X;
     }
 
     public static int eyeZoomFactorY() {
-        return eyeZoomFactorY;
+        return STRETCH_Y;
     }
 
     public static int eyeZoomRulerMax() {
@@ -523,9 +512,8 @@ public final class ToolscreenMobile implements ClientModInitializer {
     public static void noteEyeZoomActive() {
         if (eyeZoomReported) return;
         eyeZoomReported = true;
-        LOGGER.info("[{}] eyezoom drawing: region {}x{} at {}x{} zoom, ruler +/-{}",
-                MOD_ID, eyeZoomRegionWidth, eyeZoomRegionHeight,
-                eyeZoomFactorX, eyeZoomFactorY, eyeZoomRulerMax);
+        LOGGER.info("[{}] eyezoom drawing at {}x{} per pixel, ruler +/-{}",
+                MOD_ID, effectiveZoomX(), effectiveZoomY(), eyeZoomRulerMax);
     }
 
     /**
@@ -854,25 +842,11 @@ public final class ToolscreenMobile implements ClientModInitializer {
         crosshairVanilla = !"false".equalsIgnoreCase(
                 String.valueOf(props.getProperty("crosshairVanilla")).trim());
         crosshairScale = clampDouble(props.getProperty("crosshairScale"), crosshairScale, 0.1, 8.0);
-        cropCentre = clampDouble(props.getProperty("cropCentre"), cropCentre, 0.0, 1.0);
-        mainZoom = clampDouble(props.getProperty("mainZoom"), mainZoom, 1.0, 32.0);
-        cloneZoom = clampDouble(props.getProperty("cloneZoom"), cloneZoom, 0.1, 8.0);
         measureSensitivity = clampDouble(props.getProperty("measureSensitivity"), measureSensitivity, 0.001, 1.0);
         panelHeightFraction = clampDouble(props.getProperty("panelHeightFraction"), panelHeightFraction, 0.1, 1.0);
         panelAspect = clampDouble(props.getProperty("panelAspect"), panelAspect, 0.1, 4.0);
 
         eyeZoomModes = parseNameList(props.getProperty("eyezoomModes"), eyeZoomModes);
-        eyeZoomRegionWidth = clampInt(props.getProperty("eyezoomRegionWidth"), eyeZoomRegionWidth, 2, 256);
-        eyeZoomRegionHeight = clampInt(props.getProperty("eyezoomRegionHeight"), eyeZoomRegionHeight, 2, 256);
-        // eyezoomFactor stays as a single-value shorthand: it sets both axes,
-        // and the per-axis keys override it if also present.
-        int both = clampInt(props.getProperty("eyezoomFactor"), 0, 0, 256);
-        if (both > 0) {
-            eyeZoomFactorX = both;
-            eyeZoomFactorY = both;
-        }
-        eyeZoomFactorX = clampInt(props.getProperty("eyezoomFactorX"), eyeZoomFactorX, 1, 256);
-        eyeZoomFactorY = clampInt(props.getProperty("eyezoomFactorY"), eyeZoomFactorY, 1, 256);
         eyeZoomRulerMax = clampInt(props.getProperty("eyezoomRulerMax"), eyeZoomRulerMax, 1, 128);
         eyeZoomTop = clampDouble(props.getProperty("eyezoomTop"), eyeZoomTop, 0.0, 1.0);
         eyeZoomLeft = clampDouble(props.getProperty("eyezoomLeft"), eyeZoomLeft, 0.0, 1.0);
@@ -986,8 +960,6 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("eyezoomModes", String.join(", ", eyeZoomModes));
         props.setProperty("eyezoomRegionWidth", Integer.toString(eyeZoomRegionWidth));
         props.setProperty("eyezoomRegionHeight", Integer.toString(eyeZoomRegionHeight));
-        props.setProperty("eyezoomFactorX", Integer.toString(eyeZoomFactorX));
-        props.setProperty("eyezoomFactorY", Integer.toString(eyeZoomFactorY));
         props.setProperty("eyezoomRulerMax", Integer.toString(eyeZoomRulerMax));
         props.setProperty("eyezoomTop", Double.toString(eyeZoomTop));
         props.setProperty("eyezoomLeft", Double.toString(eyeZoomLeft));
@@ -995,9 +967,6 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("fovScale", Double.toString(fovScale));
         props.setProperty("crosshairVanilla", Boolean.toString(crosshairVanilla));
         props.setProperty("crosshairScale", Double.toString(crosshairScale));
-        props.setProperty("cropCentre", Double.toString(cropCentre));
-        props.setProperty("mainZoom", Double.toString(mainZoom));
-        props.setProperty("cloneZoom", Double.toString(cloneZoom));
         props.setProperty("measureSensitivity", Double.toString(measureSensitivity));
         props.setProperty("panelHeightFraction", Double.toString(panelHeightFraction));
         props.setProperty("panelAspect", Double.toString(panelAspect));

@@ -9,41 +9,29 @@ import net.minecraft.text.LiteralText;
 /**
  * The settings menu, opened with comma.
  *
- * <p>These two numbers were config-file entries, which meant a round trip
- * through a text editor and a relaunch to try a value - and the crop in
- * particular is something you judge by looking at the screen, not by reasoning
- * about it. Everything here applies as it is dragged, so the answer comes from
- * the view rather than from another build.
+ * <p>Down to one control. The crop, the main zoom, the clone zoom and the two
+ * stretch factors were all sliders until their right values were found on the
+ * device; they are constants now. A setting that has exactly one correct value
+ * is not a setting, and leaving it adjustable only invites it being moved to
+ * something that reads plausibly and measures wrongly.
  *
  * <h2>Why it is positioned the way it is</h2>
  *
  * The menu lives inside Minecraft's framebuffer, which in this mode is a narrow
- * strip thousands of rows tall, most of it off-screen. A screen laid out the
- * usual way - centred on {@code height / 2} - would therefore sit at the
- * framebuffer's middle, which is only the middle of the display when the crop
- * is centred. Since the whole point of this menu is fixing a crop that is
- * <em>not</em> centred, that would put the controls out of reach exactly when
- * they are needed. So it centres on the same row the crop puts at the middle of
- * the screen, and follows it as that changes.
+ * strip thousands of rows tall, most of it off-screen. Laid out the usual way -
+ * centred on {@code height / 2} - it would sit at the framebuffer's middle,
+ * which is not the middle of the display while the crop is offset, and the crop
+ * always is. So it centres on the row the crop actually shows.
  */
 public class ToolscreenScreen extends Screen {
 
-    /** Fine and coarse steps for the crop, as fractions of the render height. */
-    private static final double FINE_STEP = 0.002;
-    private static final double COARSE_STEP = 0.02;
+    /**
+     * Top of the sensitivity slider. 0.5 is 100% on Minecraft's own scale, so
+     * the whole useful range is reachable and nothing is clamped by this end.
+     */
+    private static final double MAX_SENSITIVITY = 0.5;
 
-    /** Upper bound of the stretch sliders; the panel reduces it to fit. */
-    private static final int MAX_STRETCH = 64;
-
-    /** Upper bound of the main-screen zoom; the GPU's limits reduce it further. */
-    private static final double MAX_MAIN_ZOOM = 16.0;
-
-    /** Top of the sensitivity slider: 0.3 is 60% on Minecraft's scale. */
-    private static final double MAX_SENSITIVITY = 0.3;
-
-    /** Rows of controls, so the block can be centred on the visible area. */
-    private static final int ROWS = 8;
-
+    private static final int ROWS = 2;
     private static final int ROW_HEIGHT = 22;
     private static final int MAX_WIDGET_WIDTH = 200;
 
@@ -54,8 +42,8 @@ public class ToolscreenScreen extends Screen {
     /**
      * The world keeps rendering and ticking behind this.
      *
-     * <p>Required, not cosmetic: every control here is judged against the live
-     * view, and a paused single-player world stops redrawing it.
+     * <p>Required, not cosmetic: the sensitivity is judged by moving the view,
+     * and a paused single-player world stops redrawing it.
      */
     @Override
     public boolean isPauseScreen() {
@@ -66,71 +54,17 @@ public class ToolscreenScreen extends Screen {
     protected void init() {
         int widgetWidth = Math.min(MAX_WIDGET_WIDTH, Math.max(60, this.width - 12));
         int left = (this.width - widgetWidth) / 2;
+        int y = firstRowY((int) Math.round(this.height * ToolscreenMobile.cropCentre()));
 
-        // The row the crop places at the centre of the display. See the class
-        // comment: using height / 2 would hide this menu whenever the crop is
-        // the thing that needs fixing.
-        int centre = (int) Math.round(this.height * ToolscreenMobile.cropCentre());
-        int y = firstRowY(centre);
-
-        addButton(new CropSlider(left, y, widgetWidth, 20));
-        y += ROW_HEIGHT;
-
-        int third = widgetWidth / 4;
-        addButton(new ButtonWidget(left, y, third - 2, 20, new LiteralText("<<"),
-                b -> nudgeCrop(-COARSE_STEP)));
-        addButton(new ButtonWidget(left + third, y, third - 2, 20, new LiteralText("<"),
-                b -> nudgeCrop(-FINE_STEP)));
-        addButton(new ButtonWidget(left + 2 * third, y, third - 2, 20, new LiteralText(">"),
-                b -> nudgeCrop(FINE_STEP)));
-        addButton(new ButtonWidget(left + 3 * third, y, third - 2, 20, new LiteralText(">>"),
-                b -> nudgeCrop(COARSE_STEP)));
-        y += ROW_HEIGHT;
-
-        addButton(new MainZoomSlider(left, y, widgetWidth, 20));
-        y += ROW_HEIGHT;
-        addButton(new CloneZoomSlider(left, y, widgetWidth, 20));
-        y += ROW_HEIGHT;
-        addButton(new StretchSlider(left, y, widgetWidth, 20, true));
-        y += ROW_HEIGHT;
-        addButton(new StretchSlider(left, y, widgetWidth, 20, false));
-        y += ROW_HEIGHT;
         addButton(new SensitivitySlider(left, y, widgetWidth, 20));
         y += ROW_HEIGHT;
-
-        int half = widgetWidth / 2;
-        addButton(new ButtonWidget(left, y, half - 2, 20, new LiteralText("Centre"), b -> {
-            ToolscreenMobile.setCropCentre(0.5);
-            rebuild();
-        }));
-        addButton(new ButtonWidget(left + half, y, half - 2, 20, new LiteralText("Done"),
-                b -> onClose()));
+        addButton(new ButtonWidget(left, y, widgetWidth, 20, new LiteralText("Done"),
+                button -> onClose()));
     }
 
     /** Top of the control block, centred on the row the crop shows. */
-    /**
-     * Slider position for a clone zoom. Static because it is needed to build the
-     * slider's initial value, which is a {@code super(...)} argument - and an
-     * instance method cannot be called before the supertype constructor runs.
-     */
-    private static double cloneZoomToSlider(double zoom) {
-        return Math.max(0.0, Math.min(1.0, Math.log(zoom) / Math.log(2.0) / 4.0 + 0.5));
-    }
-
     private static int firstRowY(int centre) {
         return centre - (ROWS * ROW_HEIGHT) / 2;
-    }
-
-    private void nudgeCrop(double delta) {
-        ToolscreenMobile.setCropCentre(ToolscreenMobile.cropCentre() + delta);
-        rebuild();
-    }
-
-    /** Re-runs {@link #init()} so the rows follow the crop they just moved. */
-    private void rebuild() {
-        if (this.client != null) {
-            this.init(this.client, this.width, this.height);
-        }
     }
 
     @Override
@@ -143,13 +77,13 @@ public class ToolscreenScreen extends Screen {
 
     @Override
     public void render(MatrixStack matrices, int mouseX, int mouseY, float delta) {
-        // No renderBackground: the view behind is what every control here is
-        // being judged against, and dimming it would defeat the purpose.
+        // No renderBackground: the view behind is what the sensitivity is being
+        // judged against, and dimming it would defeat the purpose.
         int centre = (int) Math.round(this.height * ToolscreenMobile.cropCentre());
-
-        String resolution = ToolscreenMobile.renderWidth() + "x" + ToolscreenMobile.renderHeight();
         int top = firstRowY(centre);
-        drawCentredLine(matrices, resolution, top - 22);
+
+        drawCentredLine(matrices,
+                ToolscreenMobile.renderWidth() + "x" + ToolscreenMobile.renderHeight(), top - 22);
         drawCentredLine(matrices, "Ninjabrain: " + ToolscreenMobile.renderHeight(), top - 11);
 
         super.render(matrices, mouseX, mouseY, delta);
@@ -161,86 +95,13 @@ public class ToolscreenScreen extends Screen {
     }
 
     /**
-     * Which framebuffer row lands at the centre of the screen.
-     *
-     * <p>Shown as a percentage rather than the raw fraction, and paired with the
-     * pixel row it selects, because the useful comparison while adjusting is
-     * against the render height rather than against 1.0.
-     */
-    private class CropSlider extends SliderWidget {
-
-        CropSlider(int x, int y, int width, int height) {
-            super(x, y, width, height, new LiteralText(""), ToolscreenMobile.cropCentre());
-            updateMessage();
-        }
-
-        @Override
-        protected void updateMessage() {
-            int row = (int) Math.round(ToolscreenMobile.renderHeight() * this.value);
-            setMessage(new LiteralText(String.format("Crop %.1f%%  (row %d)", this.value * 100.0, row)));
-        }
-
-        @Override
-        protected void applyValue() {
-            ToolscreenMobile.setCropCentre(this.value);
-        }
-    }
-
-    /**
-     * How much taller than the screen the game renders, which is the main
-     * screen's zoom.
-     *
-     * <p>Applied on release rather than while dragging: each change reallocates
-     * a framebuffer that can be tens of megabytes, and doing that every frame of
-     * a drag would stall the game rather than preview anything.
-     *
-     * <p>Independent of the clone panel's sliders below by design. This one
-     * decides how much angle a framebuffer pixel covers - the resolution of the
-     * measurement - while those decide how large that pixel is drawn.
-     */
-    private class MainZoomSlider extends SliderWidget {
-
-        MainZoomSlider(int x, int y, int width, int height) {
-            super(x, y, width, height, new LiteralText(""),
-                    (ToolscreenMobile.mainZoom() - 1.0) / (MAX_MAIN_ZOOM - 1.0));
-            updateMessage();
-        }
-
-        private double zoom() {
-            return 1.0 + this.value * (MAX_MAIN_ZOOM - 1.0);
-        }
-
-        @Override
-        protected void updateMessage() {
-            setMessage(new LiteralText(String.format("Main zoom  %.1fx  (%d px)",
-                    zoom(), ToolscreenMobile.renderHeight())));
-        }
-
-        @Override
-        protected void applyValue() {
-            ToolscreenMobile.setMainZoom(zoom());
-        }
-
-        @Override
-        public void onRelease(double mouseX, double mouseY) {
-            super.onRelease(mouseX, mouseY);
-            if (client != null) {
-                // Forces the render target to be rebuilt at the new height; the
-                // reported framebuffer size has changed but nothing re-reads it
-                // until a resize happens.
-                client.onResolutionChanged();
-            }
-            updateMessage();
-        }
-    }
-
-    /**
      * Mouse sensitivity used while measuring.
      *
-     * <p>Shown in Minecraft's own percentage, where its slider's 100% is 0.5
-     * here, so the number matches what the vanilla options screen would say.
-     * The range stops well below that, since the whole point is to go finer
-     * than the normal setting.
+     * <p>Shows both the percentage and the raw value: the percentage matches
+     * what Minecraft's own options screen would say, and the raw number is what
+     * actually gets written. If the view stops getting slower before the slider
+     * reaches its bottom, those two together say whether this control is the
+     * thing clamping or something downstream of it is.
      */
     private class SensitivitySlider extends SliderWidget {
 
@@ -251,89 +112,18 @@ public class ToolscreenScreen extends Screen {
         }
 
         private double sensitivity() {
-            return Math.max(0.001, this.value * MAX_SENSITIVITY);
+            return Math.max(0.0, this.value * MAX_SENSITIVITY);
         }
 
         @Override
         protected void updateMessage() {
-            setMessage(new LiteralText(String.format("Aim sens  %.1f%%", sensitivity() * 200.0)));
+            setMessage(new LiteralText(String.format("Aim sens  %.1f%%  (%.3f)",
+                    sensitivity() * 200.0, sensitivity())));
         }
 
         @Override
         protected void applyValue() {
             ToolscreenMobile.setMeasureSensitivity(sensitivity());
-        }
-    }
-
-    /**
-     * Overall magnification of the clone panel, both axes together.
-     *
-     * <p>The two sliders below set the panel's shape - how much wider than tall
-     * a framebuffer pixel is drawn. This scales both at once, so zooming in and
-     * out leaves that shape alone. The label shows the resulting cell size,
-     * since that is what the shape actually looks like once multiplied.
-     */
-    private class CloneZoomSlider extends SliderWidget {
-
-        CloneZoomSlider(int x, int y, int width, int height) {
-            super(x, y, width, height, new LiteralText(""),
-                    cloneZoomToSlider(ToolscreenMobile.cloneZoom()));
-            updateMessage();
-        }
-
-        /** 0.25x to 4x, laid out logarithmically so both halves get equal travel. */
-        private double zoom() {
-            return Math.pow(2.0, (this.value - 0.5) * 4.0);
-        }
-
-        @Override
-        protected void updateMessage() {
-            setMessage(new LiteralText(String.format("Clone zoom  %.2fx  (%dx%d)",
-                    zoom(), ToolscreenMobile.effectiveZoomX(), ToolscreenMobile.effectiveZoomY())));
-        }
-
-        @Override
-        protected void applyValue() {
-            ToolscreenMobile.setCloneZoom(zoom());
-        }
-    }
-
-    /**
-     * Horizontal or vertical magnification of the clone panel.
-     *
-     * <p>The slider is over 1..64; the panel reduces whatever it is given until
-     * the result fits beside the game window, so a large value here is a request
-     * rather than a promise.
-     */
-    private class StretchSlider extends SliderWidget {
-
-        private final boolean horizontal;
-
-        StretchSlider(int x, int y, int width, int height, boolean horizontal) {
-            super(x, y, width, height, new LiteralText(""),
-                    (horizontal ? ToolscreenMobile.eyeZoomFactorX()
-                            : ToolscreenMobile.eyeZoomFactorY()) / (double) MAX_STRETCH);
-            this.horizontal = horizontal;
-            updateMessage();
-        }
-
-        private int factor() {
-            return Math.max(1, (int) Math.round(this.value * MAX_STRETCH));
-        }
-
-        @Override
-        protected void updateMessage() {
-            setMessage(new LiteralText(
-                    (this.horizontal ? "Stretch X  " : "Stretch Y  ") + factor() + "x"));
-        }
-
-        @Override
-        protected void applyValue() {
-            if (this.horizontal) {
-                ToolscreenMobile.setEyeZoomFactorX(factor());
-            } else {
-                ToolscreenMobile.setEyeZoomFactorY(factor());
-            }
         }
     }
 }
