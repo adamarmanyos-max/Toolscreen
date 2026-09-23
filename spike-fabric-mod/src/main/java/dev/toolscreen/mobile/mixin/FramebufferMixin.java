@@ -77,6 +77,19 @@ public abstract class FramebufferMixin {
         int screenH = ToolscreenMobile.nativeHeight();
         int stripX = x + ToolscreenMobile.offsetX();
 
+        // Only Eye Measure renders taller than the screen, so only Eye Measure
+        // has anything to crop. In every other mode the framebuffer already fits
+        // the display and this would just offset a picture that was correct -
+        // which is why the crop setting has no business applying there.
+        if (!ToolscreenMobile.eyeZoomActive()) {
+            lastBlitX = stripX;
+            lastBlitY = y + ToolscreenMobile.offsetY();
+            lastBlitW = width;
+            lastBlitH = height;
+            GlStateManager.viewport(lastBlitX, lastBlitY, lastBlitW, lastBlitH);
+            return;
+        }
+
         lastBlitX = stripX;
         lastBlitY = 0;
         lastBlitW = width;

@@ -40,7 +40,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * these numbers are still being fitted against the original screenshot by
      * screenshot; it stops once the shape settles.
      */
-    private static final int CONFIG_VERSION = 4;
+    private static final int CONFIG_VERSION = 5;
     static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
     /**
@@ -134,7 +134,26 @@ public final class ToolscreenMobile implements ClientModInitializer {
     // runs along X - each game pixel is drawn wider than it is tall, which
     // suits a ruler that counts horizontal offsets.
     private static volatile int eyeZoomFactorX = 34;
-    private static volatile int eyeZoomFactorY = 17;
+
+    // Far lower than the horizontal figure, and far lower than it used to be.
+    // The panel is a fixed size now, so this decides how much of the frame fits
+    // inside it rather than how big the panel grows: at 17 an eye of ender was
+    // taller than the panel could show, and no amount of scrolling would have
+    // helped because the rows simply were not sampled. Four fits the whole of it
+    // with room either side, and the ruler counts horizontal offsets anyway, so
+    // vertical magnification buys nothing the measurement needs.
+    private static volatile int eyeZoomFactorY = 4;
+
+    /**
+     * The panel's size, as fractions of the screen, fixed regardless of zoom.
+     *
+     * <p>It used to be the sample size times the zoom, which meant turning the
+     * zoom down shrank the panel instead of showing more in it. Reproduces the
+     * original's proportions - measured off two of its screenshots the panel is
+     * 617x757 and 605x745, both about 0.81 wide per unit tall.
+     */
+    private static volatile double panelHeightFraction = 0.75;
+    private static volatile double panelAspect = 0.64;
     // The widest offset the ruler labels. Beyond half the region there are no
     // pixels left to label, so this tracks eyeZoomRegionWidth / 2. Twelve is
     // also what the original labels in two of its screenshots.
@@ -272,6 +291,26 @@ public final class ToolscreenMobile implements ClientModInitializer {
     /** Writes the current settings back to the config file. */
     public static void save() {
         writeDefaultConfig(FabricLoader.getInstance().getConfigDir().resolve(MOD_ID + ".properties"));
+    }
+
+    /** The panel's fixed width in real pixels, or 0 before the screen is known. */
+    public static int panelPixelWidth() {
+        if (nativeHeight < 2) return 0;
+        return (int) Math.round(nativeHeight * panelHeightFraction * panelAspect);
+    }
+
+    /** The panel's fixed height in real pixels, or 0 before the screen is known. */
+    public static int panelPixelHeight() {
+        if (nativeHeight < 2) return 0;
+        return (int) Math.round(nativeHeight * panelHeightFraction);
+    }
+
+    public static double panelHeightFraction() {
+        return panelHeightFraction;
+    }
+
+    public static double panelAspect() {
+        return panelAspect;
     }
 
     public static double cropCentre() {
@@ -669,6 +708,8 @@ public final class ToolscreenMobile implements ClientModInitializer {
                 String.valueOf(props.getProperty("crosshairVanilla")).trim());
         crosshairScale = clampDouble(props.getProperty("crosshairScale"), crosshairScale, 0.1, 8.0);
         cropCentre = clampDouble(props.getProperty("cropCentre"), cropCentre, 0.0, 1.0);
+        panelHeightFraction = clampDouble(props.getProperty("panelHeightFraction"), panelHeightFraction, 0.1, 1.0);
+        panelAspect = clampDouble(props.getProperty("panelAspect"), panelAspect, 0.1, 4.0);
 
         eyeZoomModes = parseNameList(props.getProperty("eyezoomModes"), eyeZoomModes);
         eyeZoomRegionWidth = clampInt(props.getProperty("eyezoomRegionWidth"), eyeZoomRegionWidth, 2, 256);
@@ -805,6 +846,8 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("crosshairVanilla", Boolean.toString(crosshairVanilla));
         props.setProperty("crosshairScale", Double.toString(crosshairScale));
         props.setProperty("cropCentre", Double.toString(cropCentre));
+        props.setProperty("panelHeightFraction", Double.toString(panelHeightFraction));
+        props.setProperty("panelAspect", Double.toString(panelAspect));
         props.setProperty("reportKey", KeyCodes.nameOf(reportKey, Integer.toString(reportKey)));
         props.setProperty("menuKey", KeyCodes.nameOf(menuKey, Integer.toString(menuKey)));
         props.setProperty("configVersion", Integer.toString(CONFIG_VERSION));

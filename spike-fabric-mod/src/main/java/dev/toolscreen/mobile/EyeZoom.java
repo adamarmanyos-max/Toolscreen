@@ -3,7 +3,6 @@ package dev.toolscreen.mobile;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawableHelper;
 import net.minecraft.client.gl.Framebuffer;
-import net.minecraft.client.util.Window;
 import net.minecraft.client.util.math.MatrixStack;
 import org.lwjgl.BufferUtils;
 import com.mojang.blaze3d.platform.GlStateManager;
@@ -114,34 +113,10 @@ public final class EyeZoom {
         hookSeen = true;
         armed = true;
 
-        Window window = client.getWindow();
-        if (window == null) return;
-
         // Taken here, at the end of the frame's rendering: the framebuffer still
         // holds the frame and the crosshair has not been drawn over it yet.
         if (ToolscreenMobile.eyeZoomActive()) {
             sampleFramebuffer(client);
-        }
-
-        // The in-strip variant, for when there is no letterbox to put the panel
-        // in. It draws the sample taken during the previous frame's blit, which
-        // is a frame behind; the alternative is reading Minecraft's render
-        // target while the HUD is being drawn into it, which is undefined.
-        if (ToolscreenMobile.eyeZoomActive() && !ToolscreenMobile.eyeZoomSide()) {
-            int[] pixels = lastPixels;
-            if (pixels != null) {
-                int zoomX = ToolscreenMobile.eyeZoomFactorX();
-                int zoomY = ToolscreenMobile.eyeZoomFactorY();
-                int panelW = lastRegionW * zoomX;
-                int panelH = lastRegionH * zoomY;
-                int panelX = (int) (window.getScaledWidth() * ToolscreenMobile.eyeZoomLeft()) - panelW / 2;
-                int panelY = (int) (window.getScaledHeight() * ToolscreenMobile.eyeZoomTop()) - panelH / 2;
-
-                drawPixels(matrices, pixels, lastRegionW, lastRegionH, panelX, panelY, zoomX, zoomY);
-                drawRuler(matrices, lastRegionW, panelX, panelY, panelH, zoomX,
-                        clamp(zoomX, 12, Math.max(12, panelH / 6)));
-                drawCentreLine(matrices, lastRegionW, panelX, panelY, panelH, zoomX);
-            }
         }
 
     }
@@ -218,18 +193,30 @@ public final class EyeZoom {
      * identical, just fewer calls.
      */
     private static void drawPixels(MatrixStack matrices, int[] pixels, int regionW, int regionH,
-                                   int panelX, int panelY, int zoomX, int zoomY) {
-        for (int row = 0; row < regionH; row++) {
+                                   int panelX, int panelY, int panelW, int panelH,
+                                   int zoomX, int zoomY) {
+        // Centred in the fixed panel and clipped by it. Integer division leaves
+        // up to one zoom step of slack; splitting it keeps the centre column on
+        // the panel's centre, which is where the divider goes.
+        int drawnW = Math.min(panelW, regionW * zoomX);
+        int drawnH = Math.min(panelH, regionH * zoomY);
+        int left = panelX + (panelW - drawnW) / 2;
+        int top = panelY + (panelH - drawnH) / 2;
+
+        int rows = Math.min(regionH, drawnH / zoomY);
+        int columns = Math.min(regionW, drawnW / zoomX);
+
+        for (int row = 0; row < rows; row++) {
             int rowStart = row * regionW;
-            int y = panelY + row * zoomY;
+            int y = top + row * zoomY;
             int col = 0;
-            while (col < regionW) {
+            while (col < columns) {
                 int colour = pixels[rowStart + col];
                 int run = 1;
-                while (col + run < regionW && pixels[rowStart + col + run] == colour) {
+                while (col + run < columns && pixels[rowStart + col + run] == colour) {
                     run++;
                 }
-                int x = panelX + col * zoomX;
+                int x = left + col * zoomX;
                 DrawableHelper.fill(matrices, x, y, x + run * zoomX, y + zoomY, colour);
                 col += run;
             }
@@ -251,23 +238,28 @@ public final class EyeZoom {
      * it half as wide as it was tall, the one proportion the original never
      * shows.
      */
-    private static void drawRuler(MatrixStack matrices, int regionW,
-                                  int panelX, int panelY, int panelH, int zoomX, int rulerH) {
-        int centreCol = regionW / 2;
+    private static void drawRuler(MatrixStack matrices, int panelX, int panelY,
+                                  int panelW, int panelH, int zoomX, int rulerH) {
+        int centreX = panelX + panelW / 2;
         int rulerY = panelY + panelH / 2 - rulerH / 2;
         int max = ToolscreenMobile.eyeZoomRulerMax();
+        int right = panelX + panelW;
 
-        for (int col = 0; col < regionW; col++) {
-            int offset = col < centreCol ? centreCol - col : col - centreCol + 1;
-            if (offset > max) continue;
+        // Laid out from the divider outward rather than across the sample, so a
+        // cell stays one framebuffer pixel whatever the panel happens to fit and
+        // cells falling outside the fixed panel are simply not drawn.
+        for (int i = -max; i < max; i++) {
+            int x = centreX + i * zoomX;
+            if (x + zoomX <= panelX || x >= right) continue;
 
-            int x = panelX + col * zoomX;
-            DrawableHelper.fill(matrices, x, rulerY, x + zoomX, rulerY + rulerH,
-                    (col % 2 == 0) ? RULER_BLUE : RULER_PINK);
-            // Hairline between cells, so a long run stays countable by eye.
-            DrawableHelper.fill(matrices, x, rulerY, x + 1, rulerY + rulerH, 0x40000000);
+            int x0 = Math.max(x, panelX);
+            int x1 = Math.min(x + zoomX, right);
+            DrawableHelper.fill(matrices, x0, rulerY, x1, rulerY + rulerH,
+                    (Math.floorMod(i, 2) == 0) ? RULER_BLUE : RULER_PINK);
+            DrawableHelper.fill(matrices, x0, rulerY, Math.min(x0 + 1, x1), rulerY + rulerH, 0x40000000);
 
-            String label = Integer.toString(offset);
+            if (x < panelX || x + zoomX > right) continue;
+            String label = Integer.toString(i < 0 ? -i : i + 1);
             int scale = Digits.fitScale(label, zoomX - 2, rulerH - 2);
             int textX = x + (zoomX - Digits.width(label, scale)) / 2;
             int textY = rulerY + (rulerH - Digits.height(scale)) / 2;
@@ -356,9 +348,9 @@ public final class EyeZoom {
     }
 
     /** The reference axis: the boundary between the two centre pixels. */
-    private static void drawCentreLine(MatrixStack matrices, int regionW,
-                                       int panelX, int panelY, int panelH, int zoomX) {
-        int x = panelX + (regionW / 2) * zoomX;
+    private static void drawCentreLine(MatrixStack matrices, int panelX, int panelY,
+                                       int panelW, int panelH) {
+        int x = panelX + panelW / 2;
         // Two pixels wide: at these zooms a hairline all but vanished
         // against the terrain, and this is the axis everything is read from.
         DrawableHelper.fill(matrices, x - 1, panelY, x + 1, panelY + panelH, 0xFFFFFFFF);
@@ -484,8 +476,6 @@ public final class EyeZoom {
     public static void renderSide(int blitX, int blitY, int blitW, int blitH) {
         if (!ToolscreenMobile.eyeZoomActive()) return;
         if (blitW < 2 || blitH < 2) return;
-
-
         if (!ToolscreenMobile.eyeZoomSide()) return;
         if (hookSeen) {
             if (!armed) return;
@@ -501,9 +491,9 @@ public final class EyeZoom {
 
         final int regionW = lastRegionW;
         final int regionH = lastRegionH;
-        if (regionW < 2 || regionH < 2) return;
+        if (regionW < 2 || regionH < 1) return;
 
-        // The bands either side of the strip, in real screen pixels.
+        // The bands either side of the game window, in real screen pixels.
         int leftBox = blitX;
         int rightBox = realW - (blitX + blitW);
         boolean useLeft = leftBox >= rightBox;
@@ -513,19 +503,22 @@ public final class EyeZoom {
         int margin = Math.max(8, realW / 120);
         int availW = boxWidth - 2 * margin;
         int availH = realH - 2 * margin;
-        // Nothing worth drawing into - Native mode, or a strip so wide there is
-        // no surround. Skipping beats overlapping the game.
-        if (availW < regionW || availH < regionH) return;
+        if (availW < 32 || availH < 32) return;
 
-        final int zoomX = Math.min(ToolscreenMobile.eyeZoomFactorX(), availW / regionW);
-        final int zoomY = Math.min(ToolscreenMobile.eyeZoomFactorY(), availH / regionH);
-        if (zoomX < 1 || zoomY < 1) return;
+        // A fixed size, not one derived from the zoom.
+        //
+        // The panel used to be region times zoom, so turning the zoom down made
+        // it shrink and turning it up made it grow until it no longer fitted.
+        // Its size is now a property of the screen and the zoom only decides how
+        // much of the frame appears inside it: less zoom shows more of the eye,
+        // rather than a smaller picture of the same amount.
+        final int panelW = Math.min(availW,
+                (int) Math.round(realH * ToolscreenMobile.panelHeightFraction()
+                        * ToolscreenMobile.panelAspect()));
+        final int panelH = Math.min(availH,
+                (int) Math.round(realH * ToolscreenMobile.panelHeightFraction()));
+        if (panelW < 32 || panelH < 32) return;
 
-        final int panelW = regionW * zoomX;
-        final int panelH = regionH * zoomY;
-        // Clamped into the band as well as centred in it. The centring above
-        // is only correct if blitX really is the left letterbox width; the
-        // clamp holds even when it is not.
         final int panelX = useLeft
                 ? clamp(boxStart + margin + (availW - panelW) / 2, 0, blitX - panelW)
                 : clamp(boxStart + margin + (availW - panelW) / 2, blitX + blitW, realW - panelW);
@@ -534,26 +527,41 @@ public final class EyeZoom {
 
         ToolscreenMobile.notePanelGeometry(realW, realH, blitX, blitW, panelX, panelY, panelW, panelH);
 
-        // Last line of defence, and not a theoretical one: the arithmetic above
-        // already said the panel fits the letterbox, and it did not - measured
-        // off a screenshot the panel covered 219 of the strip's 220 pixels. So
-        // the inputs can be wrong, and the only honest response is to check the
-        // result rather than trust the derivation. Overlapping the strip hides
+        // Last line of defence. The arithmetic above already said the panel fits
+        // beside the game window, and once it did not - measured off a
+        // screenshot it covered 219 of the strip's 220 pixels. Overlapping hides
         // the thing being measured, which is worse than showing no panel.
         if (panelX < blitX + blitW && panelX + panelW > blitX) {
             ToolscreenMobile.notePanelSuppressed(panelX, panelW, blitX, blitW);
             return;
         }
 
+        final int zoomX = Math.max(1, ToolscreenMobile.eyeZoomFactorX());
+        final int zoomY = Math.max(1, ToolscreenMobile.eyeZoomFactorY());
         final int rulerH = clamp(zoomX, 12, Math.max(12, panelH / 6));
 
         withFullSurface(blitX, blitY, blitW, blitH, () -> {
             MatrixStack matrices = new MatrixStack();
-            drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, zoomX, zoomY);
-            drawRuler(matrices, regionW, panelX, panelY, panelH, zoomX, rulerH);
-            drawCentreLine(matrices, regionW, panelX, panelY, panelH, zoomX);
+            // Painted first, at the fixed size, so the panel keeps its outline
+            // even where the magnified image does not divide into it exactly.
+            DrawableHelper.fill(matrices, panelX, panelY, panelX + panelW, panelY + panelH, 0xFF101014);
+            drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, panelW, panelH, zoomX, zoomY);
+            drawRuler(matrices, panelX, panelY, panelW, panelH, zoomX, rulerH);
+            drawCentreLine(matrices, panelX, panelY, panelW, panelH);
             drawCrosshair(matrices, blitX, blitY, blitW, blitH);
         });
+    }
+
+    /** How many framebuffer columns the panel can show at the current zoom. */
+    public static int columnsFor(int panelWidth, int zoomX) {
+        int columns = panelWidth / Math.max(1, zoomX);
+        if (columns % 2 != 0) columns--;
+        return Math.max(2, columns);
+    }
+
+    /** How many framebuffer rows the panel can show at the current zoom. */
+    public static int rowsFor(int panelHeight, int zoomY) {
+        return Math.max(1, panelHeight / Math.max(1, zoomY));
     }
 
     private static int clamp(int value, int min, int max) {
