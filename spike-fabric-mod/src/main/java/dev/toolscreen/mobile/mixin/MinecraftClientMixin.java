@@ -4,6 +4,7 @@ import dev.toolscreen.mobile.Measurement;
 import dev.toolscreen.mobile.ToolscreenScreen;
 import dev.toolscreen.mobile.ToolscreenMobile;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gl.Framebuffer;
 import net.minecraft.client.util.InputUtil;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -51,6 +52,9 @@ public abstract class MinecraftClientMixin {
             return;
         }
 
+        ToolscreenMobile.syncSensitivity(client);
+        toolscreen$healSizeDrift(client);
+
         boolean down = InputUtil.isKeyPressed(client.getWindow().getHandle(), ToolscreenMobile.toggleKey());
 
         // Edge-triggered: cycle once per press, not once per tick held.
@@ -76,5 +80,35 @@ public abstract class MinecraftClientMixin {
             client.openScreen(new ToolscreenScreen());
         }
         this.toolscreen$menuWasDown = menu;
+    }
+
+    /**
+     * Rebuilds the render target when its size no longer matches the reported
+     * one.
+     *
+     * <p>They can drift apart: the texture is allocated at whatever the getters
+     * said during the last resize, while the projection matrix and the final
+     * blit are built from whatever they say now. The GPU limits that bound the
+     * height are queried lazily, so the first value reported is not always the
+     * one that sticks - and a mode switch or a zoom change moves it too.
+     *
+     * <p>While they disagree the world is rendered with a projection for one
+     * shape into a texture of another, which stretches the picture along one
+     * axis: measured off a screenshot, an eye of ender came out 1.5 times wider
+     * than it was tall. Checking here costs two field reads a tick and repairs
+     * it from any cause rather than from the one I happened to guess at.
+     */
+    @Unique
+    private void toolscreen$healSizeDrift(MinecraftClient client) {
+        if (!ToolscreenMobile.isOverrideActive()) return;
+        Framebuffer framebuffer = client.getFramebuffer();
+        if (framebuffer == null) return;
+
+        int width = client.getWindow().getFramebufferWidth();
+        int height = client.getWindow().getFramebufferHeight();
+        if (framebuffer.textureWidth == width && framebuffer.textureHeight == height) return;
+
+        ToolscreenMobile.noteSizeDrift(framebuffer.textureWidth, framebuffer.textureHeight, width, height);
+        client.onResolutionChanged();
     }
 }

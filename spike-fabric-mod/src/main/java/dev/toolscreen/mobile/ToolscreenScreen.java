@@ -38,8 +38,11 @@ public class ToolscreenScreen extends Screen {
     /** Upper bound of the main-screen zoom; the GPU's limits reduce it further. */
     private static final double MAX_MAIN_ZOOM = 16.0;
 
+    /** Top of the sensitivity slider: 0.3 is 60% on Minecraft's scale. */
+    private static final double MAX_SENSITIVITY = 0.3;
+
     /** Rows of controls, so the block can be centred on the visible area. */
-    private static final int ROWS = 7;
+    private static final int ROWS = 8;
 
     private static final int ROW_HEIGHT = 22;
     private static final int MAX_WIDGET_WIDTH = 200;
@@ -91,6 +94,8 @@ public class ToolscreenScreen extends Screen {
         addButton(new StretchSlider(left, y, widgetWidth, 20, true));
         y += ROW_HEIGHT;
         addButton(new StretchSlider(left, y, widgetWidth, 20, false));
+        y += ROW_HEIGHT;
+        addButton(new SensitivitySlider(left, y, widgetWidth, 20));
         y += ROW_HEIGHT;
 
         int half = widgetWidth / 2;
@@ -226,6 +231,37 @@ public class ToolscreenScreen extends Screen {
                 client.onResolutionChanged();
             }
             updateMessage();
+        }
+    }
+
+    /**
+     * Mouse sensitivity used while measuring.
+     *
+     * <p>Shown in Minecraft's own percentage, where its slider's 100% is 0.5
+     * here, so the number matches what the vanilla options screen would say.
+     * The range stops well below that, since the whole point is to go finer
+     * than the normal setting.
+     */
+    private class SensitivitySlider extends SliderWidget {
+
+        SensitivitySlider(int x, int y, int width, int height) {
+            super(x, y, width, height, new LiteralText(""),
+                    ToolscreenMobile.measureSensitivity() / MAX_SENSITIVITY);
+            updateMessage();
+        }
+
+        private double sensitivity() {
+            return Math.max(0.001, this.value * MAX_SENSITIVITY);
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(new LiteralText(String.format("Aim sens  %.1f%%", sensitivity() * 200.0)));
+        }
+
+        @Override
+        protected void applyValue() {
+            ToolscreenMobile.setMeasureSensitivity(sensitivity());
         }
     }
 

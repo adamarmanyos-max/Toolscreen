@@ -2,6 +2,7 @@ package dev.toolscreen.mobile;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.MinecraftClient;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -40,7 +41,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * these numbers are still being fitted against the original screenshot by
      * screenshot; it stops once the shape settles.
      */
-    private static final int CONFIG_VERSION = 7;
+    private static final int CONFIG_VERSION = 8;
     static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
     /**
@@ -108,6 +109,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile boolean maxViewportReported;
     private static volatile boolean cropReported;
     private static volatile boolean clampReported;
+    private static volatile boolean driftReported;
 
     // ---- EyeZoom ----------------------------------------------------------
     // Per-mode, matching the Windows tool, where the EyeZoom settings live
@@ -258,6 +260,22 @@ public final class ToolscreenMobile implements ClientModInitializer {
      */
     private static volatile double cloneZoom = 1.0;
 
+    /**
+     * Mouse sensitivity while a measuring mode is active, in Minecraft's own
+     * units, where 1.0 is the slider's 200%.
+     *
+     * <p>Aiming at eight times magnification needs a fraction of the
+     * sensitivity that walking around does - a flick that moves the crosshair a
+     * few pixels normally now sweeps it past the whole eye. Applied on entering
+     * the mode and put back on leaving, so the setting that suits the rest of
+     * the run is not the one being used to measure with.
+     */
+    private static volatile double measureSensitivity = 0.05;
+
+    /** The player's own sensitivity, held while ours is in force. */
+    private static volatile double savedSensitivity;
+    private static volatile boolean sensitivityApplied;
+
     /** Where the rendered area sits within the real screen. */
     public enum Align { LEFT, CENTER, RIGHT }
 
@@ -347,6 +365,42 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
     public static double panelAspect() {
         return panelAspect;
+    }
+
+    public static double measureSensitivity() {
+        return measureSensitivity;
+    }
+
+    public static void setMeasureSensitivity(double value) {
+        measureSensitivity = Math.max(0.001, Math.min(1.0, value));
+    }
+
+    /**
+     * Puts our sensitivity in force while measuring, and the player's back
+     * afterwards.
+     *
+     * <p>Driven from the client tick rather than from the mode toggle, so it
+     * also follows a change made in the menu, and so leaving the world restores
+     * the player's own value - which matters because that is roughly when
+     * Minecraft writes options.txt, and a value saved there would otherwise
+     * outlive the session.
+     */
+    public static void syncSensitivity(MinecraftClient client) {
+        if (client == null || client.options == null) return;
+        boolean measuring = client.world != null && isOverrideActive() && eyeZoomActive();
+
+        if (measuring) {
+            if (!sensitivityApplied) {
+                savedSensitivity = client.options.mouseSensitivity;
+                sensitivityApplied = true;
+                LOGGER.info("[{}] sensitivity {} -> {} for measuring",
+                        MOD_ID, savedSensitivity, measureSensitivity);
+            }
+            client.options.mouseSensitivity = measureSensitivity;
+        } else if (sensitivityApplied) {
+            client.options.mouseSensitivity = savedSensitivity;
+            sensitivityApplied = false;
+        }
     }
 
     public static double cloneZoom() {
@@ -556,6 +610,22 @@ public final class ToolscreenMobile implements ClientModInitializer {
         if (maxViewportReported) return;
         maxViewportReported = true;
         LOGGER.info("[{}] GL_MAX_VIEWPORT_DIMS is {}x{}", MOD_ID, width, height);
+    }
+
+    /**
+     * Logged once when the render target's size has drifted from the reported
+     * one.
+     *
+     * <p>Worth its own line because the symptom is not obviously a size problem:
+     * the world is drawn with a projection built from the reported size into a
+     * texture of a different size, so the picture comes out stretched along one
+     * axis while everything else looks normal.
+     */
+    public static void noteSizeDrift(int textureW, int textureH, int reportedW, int reportedH) {
+        if (driftReported) return;
+        driftReported = true;
+        LOGGER.info("[{}] render target was {}x{} but the reported size is {}x{}; resizing",
+                MOD_ID, textureW, textureH, reportedW, reportedH);
     }
 
     /** Logged once: the driver's texture ceiling, which bounds the render height. */
@@ -787,6 +857,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         cropCentre = clampDouble(props.getProperty("cropCentre"), cropCentre, 0.0, 1.0);
         mainZoom = clampDouble(props.getProperty("mainZoom"), mainZoom, 1.0, 32.0);
         cloneZoom = clampDouble(props.getProperty("cloneZoom"), cloneZoom, 0.1, 8.0);
+        measureSensitivity = clampDouble(props.getProperty("measureSensitivity"), measureSensitivity, 0.001, 1.0);
         panelHeightFraction = clampDouble(props.getProperty("panelHeightFraction"), panelHeightFraction, 0.1, 1.0);
         panelAspect = clampDouble(props.getProperty("panelAspect"), panelAspect, 0.1, 4.0);
 
@@ -927,6 +998,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("cropCentre", Double.toString(cropCentre));
         props.setProperty("mainZoom", Double.toString(mainZoom));
         props.setProperty("cloneZoom", Double.toString(cloneZoom));
+        props.setProperty("measureSensitivity", Double.toString(measureSensitivity));
         props.setProperty("panelHeightFraction", Double.toString(panelHeightFraction));
         props.setProperty("panelAspect", Double.toString(panelAspect));
         props.setProperty("reportKey", KeyCodes.nameOf(reportKey, Integer.toString(reportKey)));
