@@ -35,6 +35,9 @@ public class ToolscreenScreen extends Screen {
     /** Upper bound of the stretch sliders; the panel reduces it to fit. */
     private static final int MAX_STRETCH = 64;
 
+    /** Upper bound of the main-screen zoom; the GPU's limits reduce it further. */
+    private static final double MAX_MAIN_ZOOM = 16.0;
+
     private static final int ROW_HEIGHT = 22;
     private static final int MAX_WIDGET_WIDTH = 200;
 
@@ -62,7 +65,7 @@ public class ToolscreenScreen extends Screen {
         // comment: using height / 2 would hide this menu whenever the crop is
         // the thing that needs fixing.
         int centre = (int) Math.round(this.height * ToolscreenMobile.cropCentre());
-        int y = centre - 2 * ROW_HEIGHT;
+        int y = centre - 3 * ROW_HEIGHT;
 
         addButton(new CropSlider(left, y, widgetWidth, 20));
         y += ROW_HEIGHT;
@@ -78,6 +81,8 @@ public class ToolscreenScreen extends Screen {
                 b -> nudgeCrop(COARSE_STEP)));
         y += ROW_HEIGHT;
 
+        addButton(new MainZoomSlider(left, y, widgetWidth, 20));
+        y += ROW_HEIGHT;
         addButton(new StretchSlider(left, y, widgetWidth, 20, true));
         y += ROW_HEIGHT;
         addButton(new StretchSlider(left, y, widgetWidth, 20, false));
@@ -154,6 +159,54 @@ public class ToolscreenScreen extends Screen {
         @Override
         protected void applyValue() {
             ToolscreenMobile.setCropCentre(this.value);
+        }
+    }
+
+    /**
+     * How much taller than the screen the game renders, which is the main
+     * screen's zoom.
+     *
+     * <p>Applied on release rather than while dragging: each change reallocates
+     * a framebuffer that can be tens of megabytes, and doing that every frame of
+     * a drag would stall the game rather than preview anything.
+     *
+     * <p>Independent of the clone panel's sliders below by design. This one
+     * decides how much angle a framebuffer pixel covers - the resolution of the
+     * measurement - while those decide how large that pixel is drawn.
+     */
+    private class MainZoomSlider extends SliderWidget {
+
+        MainZoomSlider(int x, int y, int width, int height) {
+            super(x, y, width, height, new LiteralText(""),
+                    (ToolscreenMobile.mainZoom() - 1.0) / (MAX_MAIN_ZOOM - 1.0));
+            updateMessage();
+        }
+
+        private double zoom() {
+            return 1.0 + this.value * (MAX_MAIN_ZOOM - 1.0);
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(new LiteralText(String.format("Main zoom  %.1fx  (%d px)",
+                    zoom(), ToolscreenMobile.renderHeight())));
+        }
+
+        @Override
+        protected void applyValue() {
+            ToolscreenMobile.setMainZoom(zoom());
+        }
+
+        @Override
+        public void onRelease(double mouseX, double mouseY) {
+            super.onRelease(mouseX, mouseY);
+            if (client != null) {
+                // Forces the render target to be rebuilt at the new height; the
+                // reported framebuffer size has changed but nothing re-reads it
+                // until a resize happens.
+                client.onResolutionChanged();
+            }
+            updateMessage();
         }
     }
 

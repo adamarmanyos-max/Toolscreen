@@ -40,7 +40,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * these numbers are still being fitted against the original screenshot by
      * screenshot; it stops once the shape settles.
      */
-    private static final int CONFIG_VERSION = 5;
+    private static final int CONFIG_VERSION = 6;
     static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
     /**
@@ -70,7 +70,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
             // over the render height, so 16384 rows magnify the view about eight
             // times without touching the camera - which the earlier fovScale did,
             // and which silently falsified every reading it produced.
-            new Mode("Eye Measure", 0.11, 16384),
+            new Mode("Eye Measure", 0.11, 1.00),
             new Mode("Wide Short", 1.00, 0.25)
     );
 
@@ -222,6 +222,26 @@ public final class ToolscreenMobile implements ClientModInitializer {
      */
     private static volatile double cropCentre = 0.5;
 
+    /**
+     * How much taller than the screen the game renders, in Eye Measure.
+     *
+     * <p>This is the main screen's zoom, and the only honest way to produce one:
+     * angle per pixel is the vertical field of view over the render height, so
+     * rendering eight times taller and showing the middle slice at 1:1 magnifies
+     * the view eightfold while leaving the camera alone. Scaling the field of
+     * view instead would look identical and quietly falsify every reading, which
+     * is what an earlier version did.
+     *
+     * <p>Deliberately separate from the clone panel's zoom. One decides how much
+     * angle a framebuffer pixel covers; the other decides how large that pixel
+     * is drawn beside the game. Tying them together would mean no way to enlarge
+     * the ruler without also changing what it measures.
+     *
+     * <p>1.0 is vanilla. The ceiling is whatever the GPU's texture and viewport
+     * limits allow, which {@link GlLimits} applies and logs.
+     */
+    private static volatile double mainZoom = 8.0;
+
     /** Where the rendered area sits within the real screen. */
     public enum Align { LEFT, CENTER, RIGHT }
 
@@ -311,6 +331,29 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
     public static double panelAspect() {
         return panelAspect;
+    }
+
+    public static double mainZoom() {
+        return mainZoom;
+    }
+
+    public static void setMainZoom(double value) {
+        mainZoom = Math.max(1.0, Math.min(32.0, value));
+    }
+
+    /**
+     * The framebuffer height for this mode: its own height, times the main zoom
+     * when the mode is one that measures.
+     *
+     * <p>Only the measuring modes get the extra height. Everywhere else it would
+     * be a large texture and a slow frame bought for nothing, since nothing is
+     * counting pixels there.
+     */
+    public static int resolveRenderHeight(Mode mode, int nativeHeight) {
+        int base = mode.resolveHeight(nativeHeight);
+        if (!eyeZoomActive()) return base;
+        long scaled = Math.round(base * mainZoom);
+        return (int) Math.min(scaled, Mode.MAX_PIXELS);
     }
 
     public static double cropCentre() {
@@ -708,6 +751,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
                 String.valueOf(props.getProperty("crosshairVanilla")).trim());
         crosshairScale = clampDouble(props.getProperty("crosshairScale"), crosshairScale, 0.1, 8.0);
         cropCentre = clampDouble(props.getProperty("cropCentre"), cropCentre, 0.0, 1.0);
+        mainZoom = clampDouble(props.getProperty("mainZoom"), mainZoom, 1.0, 32.0);
         panelHeightFraction = clampDouble(props.getProperty("panelHeightFraction"), panelHeightFraction, 0.1, 1.0);
         panelAspect = clampDouble(props.getProperty("panelAspect"), panelAspect, 0.1, 4.0);
 
@@ -846,6 +890,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("crosshairVanilla", Boolean.toString(crosshairVanilla));
         props.setProperty("crosshairScale", Double.toString(crosshairScale));
         props.setProperty("cropCentre", Double.toString(cropCentre));
+        props.setProperty("mainZoom", Double.toString(mainZoom));
         props.setProperty("panelHeightFraction", Double.toString(panelHeightFraction));
         props.setProperty("panelAspect", Double.toString(panelAspect));
         props.setProperty("reportKey", KeyCodes.nameOf(reportKey, Integer.toString(reportKey)));

@@ -57,7 +57,8 @@ public abstract class WindowMixin {
         if (!ToolscreenMobile.isOverrideActive()) return;
         Mode mode = ToolscreenMobile.activeMode();
         int width = GlLimits.clampTexture(mode.resolveWidth(ToolscreenMobile.nativeWidth()));
-        int height = GlLimits.clampTexture(mode.resolveHeight(ToolscreenMobile.nativeHeight()));
+        int height = GlLimits.clampTexture(
+                ToolscreenMobile.resolveRenderHeight(mode, ToolscreenMobile.nativeHeight()));
         ToolscreenMobile.recordReportedSize(width, height);
         ToolscreenMobile.recordRenderSize(width, height);
         cir.setReturnValue(width);
@@ -68,7 +69,8 @@ public abstract class WindowMixin {
         ToolscreenMobile.recordNativeSize(this.framebufferWidth, this.framebufferHeight);
         if (!ToolscreenMobile.isOverrideActive()) return;
         Mode mode = ToolscreenMobile.activeMode();
-        cir.setReturnValue(GlLimits.clampTexture(mode.resolveHeight(ToolscreenMobile.nativeHeight())));
+        cir.setReturnValue(GlLimits.clampTexture(
+                ToolscreenMobile.resolveRenderHeight(mode, ToolscreenMobile.nativeHeight())));
     }
 
     // ---- GUI coordinate space ---------------------------------------------
@@ -94,7 +96,8 @@ public abstract class WindowMixin {
     @Inject(method = "getScaledHeight", at = @At("HEAD"), cancellable = true)
     private void toolscreen$overrideScaledHeight(CallbackInfoReturnable<Integer> cir) {
         if (!ToolscreenMobile.isOverrideActive() || this.scaleFactor <= 0) return;
-        int height = GlLimits.clampTexture(ToolscreenMobile.activeMode().resolveHeight(ToolscreenMobile.nativeHeight()));
+        int height = GlLimits.clampTexture(ToolscreenMobile.resolveRenderHeight(
+                ToolscreenMobile.activeMode(), ToolscreenMobile.nativeHeight()));
         cir.setReturnValue((int) Math.ceil(height / this.scaleFactor));
     }
 }
