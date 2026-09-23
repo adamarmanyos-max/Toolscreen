@@ -40,7 +40,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * these numbers are still being fitted against the original screenshot by
      * screenshot; it stops once the shape settles.
      */
-    private static final int CONFIG_VERSION = 3;
+    private static final int CONFIG_VERSION = 4;
     static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
     /**
@@ -65,15 +65,12 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static final List<Mode> DEFAULT_MODES = List.of(
             new Mode("Native", 1.00, 1.00),
             new Mode("Thin", 0.14, 1.00),
-            // Renders far taller than the screen on purpose. Angle per pixel is
-            // the vertical field of view divided by the render height, so a
-            // 16384-pixel render resolves a horizontal offset about eight times
-            // more finely than a screen-height one - that is the whole
-            // mechanism the eye measurement rests on. The width is a fraction
-            // because the framebuffer is blitted 1:1, which makes the render
-            // width and the on-screen window width the same number: 0.161 of
-            // the screen is 446 pixels at 2778 wide, the measured target.
-            new Mode("Eye Measure", 0.161, 16384),
+            // Width as before; height far beyond the screen on purpose. That
+            // height is the zoom: angle per pixel is the vertical field of view
+            // over the render height, so 16384 rows magnify the view about eight
+            // times without touching the camera - which the earlier fovScale did,
+            // and which silently falsified every reading it produced.
+            new Mode("Eye Measure", 0.11, 16384),
             new Mode("Wide Short", 1.00, 0.25)
     );
 
@@ -81,9 +78,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile int activeIndex = 0;
     private static volatile int toggleKey = DEFAULT_TOGGLE_KEY;
 
-    /**
-     * Prints the measurement check. Default M, which vanilla leaves unbound.
-     */
+    /** Prints the measurement check. Default M, which vanilla leaves unbound. */
     private static volatile int reportKey = 77;
     private static volatile Align align = Align.CENTER;
 
@@ -99,53 +94,53 @@ public final class ToolscreenMobile implements ClientModInitializer {
     /**
      * The framebuffer size actually in use, as last reported to Minecraft.
      *
-     * <p>Recorded rather than recomputed because it is the number that has to be
-     * typed into Ninjabrain Bot's tall-resolution box, and a number derived a
-     * second time from the config is a number that can disagree with the one the
-     * game is really rendering at. This is the one the game got.
+     * <p>Recorded rather than recomputed: it is the number that has to be typed
+     * into Ninjabrain Bot's tall-resolution box, and a figure derived a second
+     * time from the config is one that can disagree with what the game is really
+     * rendering at. This is what the game got.
      */
     private static volatile int renderWidth;
     private static volatile int renderHeight;
+    private static volatile boolean maxTextureReported;
+    private static volatile boolean clampReported;
 
     // ---- EyeZoom ----------------------------------------------------------
     // Per-mode, matching the Windows tool, where the EyeZoom settings live
     // under Modes rather than as a global toggle.
     private static volatile List<String> eyeZoomModes = List.of("Eye Measure");
-    // ---- Layout ----------------------------------------------------------
+    // How many game pixels are magnified, and how far each one is blown up.
     //
-    // Every one of these is a fraction of the screen, never a pixel count. The
-    // original is a Windows tool measured against one monitor, so its published
-    // numbers are only correct at that resolution; stored proportionally they
-    // reproduce those numbers there and stay sensible on a phone. Layout turns
-    // them into pixels.
+    // The two are a budget, not independent settings: region times factor is
+    // the panel size, and the panel has to fit the letterbox beside the strip.
+    // On an iPad in Eye Measure that band is around 1050 pixels wide, so 24
+    // pixels at 34x fills it. Asking for more of both is what produced a panel
+    // 1680 wide that ran straight across the game; EyeZoom reduces the factors
+    // until the panel fits, so these are an upper bound rather than a promise.
     //
-    // The values reproduce, at 2778x1940: game window 446 wide, panel 931x1455,
-    // ruler 744x58 with 31-pixel cells.
+    // The region is far taller than it is wide because the original's panel is:
+    // measured off two of its screenshots it is 617x757 and 605x745, both about
+    // 0.81 wide for every unit tall. Ours was landscape, which is why it looked
+    // nothing like it however the colours were tuned.
+    private static volatile int eyeZoomRegionWidth = 24;
+    private static volatile int eyeZoomRegionHeight = 60;
 
-    /** Panel height, as a fraction of screen height. */
-    private static volatile double panelHeightFraction = 0.75;
-
-    /** Panel width, as a fraction of its own height. */
-    private static volatile double panelAspect = 0.64;
-
-    /** Ruler width, as a fraction of the panel width. */
-    private static volatile double rulerWidthFraction = 0.80;
-
-    /** Ruler height, as a fraction of screen height. */
-    private static volatile double rulerHeightFraction = 0.03;
-
-    /** Ruler cells, total: half either side of the divider. */
-    private static volatile int rulerCells = 24;
-
-    /**
-     * Rows of framebuffer per row of panel.
-     *
-     * <p>One, so the panel shows the game view's own vertical scale and only the
-     * horizontal axis is magnified. The horizontal zoom is not configurable at
-     * all: it is the ruler cell width, because one cell has to be one
-     * framebuffer pixel for the count to mean anything.
-     */
-    private static volatile int verticalStride = 1;
+    // Separate horizontal and vertical magnification, as the original has:
+    // its strings carry clone_width and clone_height independently. The stretch
+    // runs along X - each game pixel is drawn wider than it is tall, which
+    // suits a ruler that counts horizontal offsets.
+    private static volatile int eyeZoomFactorX = 34;
+    private static volatile int eyeZoomFactorY = 17;
+    // The widest offset the ruler labels. Beyond half the region there are no
+    // pixels left to label, so this tracks eyeZoomRegionWidth / 2. Twelve is
+    // also what the original labels in two of its screenshots.
+    private static volatile int eyeZoomRulerMax = 12;
+    // Just below the crosshair rather than up in the sky: close enough to read
+    // without moving your eye far, clear of the centre region being sampled.
+    // Centred in the left letterbox band, matching where the Windows tool puts
+    // it. These are fractions of the whole screen when eyezoomSide is on.
+    private static volatile double eyeZoomTop = 0.5;
+    private static volatile double eyeZoomLeft = 0.23;
+    private static volatile boolean eyeZoomSide = true;
 
     // The original fills the area around the game rather than leaving it bare;
     // its localization table carries background, bg_image_path and color_stops.
@@ -162,19 +157,35 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * go further: a narrower field spreads the same view over more pixels, so
      * each pixel covers a smaller angle and a pixel count means more.
      */
+    private static volatile double fovScale = 0.5;
 
     private static volatile boolean eyeZoomReported;
+    private static volatile boolean overlayHookReported;
+    private static volatile boolean surfaceReported;
+    private static volatile boolean bindingReported;
     private static volatile boolean fovReported;
     private static volatile boolean panelReported;
-    private static volatile Layout layout;
-    private static volatile boolean maxTextureReported;
-    private static volatile boolean clampReported;
+    private static volatile boolean suppressReported;
     private static volatile boolean feedbackReported;
     private static volatile int lastReportedWidth;
     private static volatile int lastReportedHeight;
     private static volatile boolean crosshairEnabled = true;
     private static volatile int crosshairSize = 3;
     private static volatile int crosshairGap = 2;
+
+    /**
+     * Draw Minecraft's own crosshair texture rather than a plain cross.
+     *
+     * <p>Off falls back to the drawn cross, for the case where a translation
+     * layer mishandles the inverting blend the vanilla one relies on.
+     */
+    private static volatile boolean crosshairVanilla = true;
+
+    /**
+     * Multiplier on the crosshair's size, which is otherwise derived from the
+     * width of the game window so it stays proportional on any device.
+     */
+    private static volatile double crosshairScale = 1.0;
 
     /** Where the rendered area sits within the real screen. */
     public enum Align { LEFT, CENTER, RIGHT }
@@ -222,32 +233,63 @@ public final class ToolscreenMobile implements ClientModInitializer {
     }
 
     /** Half-width of the gap left at the crosshair's centre, in GUI units. */
+    public static boolean crosshairVanilla() {
+        return crosshairVanilla;
+    }
+
+    public static double crosshairScale() {
+        return crosshairScale;
+    }
+
     public static int crosshairGap() {
         return crosshairGap;
     }
 
-    public static double panelHeightFraction() {
-        return panelHeightFraction;
+    public static int eyeZoomRegionWidth() {
+        return eyeZoomRegionWidth;
     }
 
-    public static double panelAspect() {
-        return panelAspect;
+    public static int eyeZoomRegionHeight() {
+        return eyeZoomRegionHeight;
     }
 
-    public static double rulerWidthFraction() {
-        return rulerWidthFraction;
+    public static int eyeZoomFactorX() {
+        return eyeZoomFactorX;
     }
 
-    public static double rulerHeightFraction() {
-        return rulerHeightFraction;
+    public static int eyeZoomFactorY() {
+        return eyeZoomFactorY;
     }
 
-    public static int rulerCells() {
-        return rulerCells;
+    public static int eyeZoomRulerMax() {
+        return eyeZoomRulerMax;
     }
 
-    public static int verticalStride() {
-        return verticalStride;
+    /** Centre of the panel vertically, as a fraction of the strip's height. */
+    public static double eyeZoomTop() {
+        return eyeZoomTop;
+    }
+
+    /** Centre of the panel horizontally, as a fraction of the strip's width. */
+    public static double eyeZoomLeft() {
+        return eyeZoomLeft;
+    }
+
+    /**
+     * Logged once the first time the render hook runs at all.
+     *
+     * <p>Paired with {@link #noteEyeZoomActive()} this gives a diagnostic
+     * ladder in latest.log, so a non-appearing overlay can be placed exactly:
+     * no line at all means the mixin never attached or the method is never
+     * called; this line without the drawing line means the active mode is not
+     * one listed under eyezoomModes; both lines mean it is drawing and the
+     * problem is visual rather than structural.
+     */
+    public static void noteOverlayHookFired() {
+        if (overlayHookReported) return;
+        overlayHookReported = true;
+        LOGGER.info("[{}] overlay hook firing (mode={}, eyezoom={})",
+                MOD_ID, activeMode().name(), eyeZoomActive());
     }
 
     /**
@@ -260,30 +302,46 @@ public final class ToolscreenMobile implements ClientModInitializer {
     public static void noteEyeZoomActive() {
         if (eyeZoomReported) return;
         eyeZoomReported = true;
-        LOGGER.info("[{}] eyezoom drawing", MOD_ID);
-    }
-
-    /** Logged once: the driver's texture ceiling, which bounds the render height. */
-    public static void noteMaxTexture(int max) {
-        if (maxTextureReported) return;
-        maxTextureReported = true;
-        LOGGER.info("[{}] GL_MAX_TEXTURE_SIZE is {}", MOD_ID, max);
+        LOGGER.info("[{}] eyezoom drawing: region {}x{} at {}x{} zoom, ruler +/-{}",
+                MOD_ID, eyeZoomRegionWidth, eyeZoomRegionHeight,
+                eyeZoomFactorX, eyeZoomFactorY, eyeZoomRulerMax);
     }
 
     /**
-     * Logged once if the configured render size had to be reduced.
+     * Logged once when the FOV override actually takes effect.
      *
-     * <p>A warning rather than a note: the measurement stays self-consistent
-     * because the ruler counts real framebuffer pixels either way, but the
-     * number that has to go into Ninjabrain Bot is now the clamped one, and
-     * using the configured one instead would be wrong by their ratio.
+     * <p>Same reasoning as {@link #noteEyeZoomActive()}: the injection is
+     * optional, so without this the difference between "narrowing the view" and
+     * "mixin never attached" is a judgement call made from a screenshot.
      */
-    public static void noteTextureClamp(int requested, int clamped) {
-        if (clampReported) return;
-        clampReported = true;
-        LOGGER.warn("[{}] render size {} exceeds this GPU's texture limit; using {}. "
-                        + "Enter {} in Ninjabrain Bot, not {}",
-                MOD_ID, requested, clamped, clamped, requested);
+    public static void noteFovActive(double original, double scaled) {
+        if (fovReported) return;
+        fovReported = true;
+        LOGGER.info("[{}] fov override: {} -> {} (scale {})",
+                MOD_ID, original, scaled, fovScale);
+    }
+
+    /**
+     * Logged once, the first time the side panel works out where to go.
+     *
+     * <p>Added because the fit-to-letterbox arithmetic produced a panel that
+     * covered the strip anyway. Which input was wrong could not be settled by
+     * reasoning about it, so the numbers are now on the record instead.
+     */
+    public static void notePanelGeometry(int realW, int realH, int blitX, int blitW,
+                                         int panelX, int panelY, int panelW, int panelH) {
+        if (panelReported) return;
+        panelReported = true;
+        LOGGER.info("[{}] panel: surface {}x{}, blit x={} w={}, panel x={} y={} {}x{}",
+                MOD_ID, realW, realH, blitX, blitW, panelX, panelY, panelW, panelH);
+    }
+
+    /** Logged once if the panel had to be dropped for overlapping the strip. */
+    public static void notePanelSuppressed(int panelX, int panelW, int blitX, int blitW) {
+        if (suppressReported) return;
+        suppressReported = true;
+        LOGGER.warn("[{}] panel suppressed: it spans {}..{} which overlaps the strip at {}..{}",
+                MOD_ID, panelX, panelX + panelW, blitX, blitX + blitW);
     }
 
     /** Framebuffer width actually in use. */
@@ -296,13 +354,17 @@ public final class ToolscreenMobile implements ClientModInitializer {
         return renderHeight;
     }
 
+    public static int reportKey() {
+        return reportKey;
+    }
+
     /**
-     * Records the framebuffer size Minecraft was actually given, and announces
-     * it the first time and whenever it changes.
+     * Records the framebuffer size Minecraft was actually given, and announces it
+     * when it changes.
      *
-     * <p>Logged at INFO with the Ninjabrain wording attached, because getting
-     * this number wrong is silent: the tool keeps working and every reading it
-     * produces is wrong by the ratio of the two heights.
+     * <p>Getting this number wrong is silent: the tool keeps working and every
+     * reading is wrong by the ratio of the two heights, so it is logged with the
+     * Ninjabrain wording attached rather than left to be inferred.
      */
     public static void recordRenderSize(int width, int height) {
         if (width < 2 || height < 2) return;
@@ -310,7 +372,28 @@ public final class ToolscreenMobile implements ClientModInitializer {
         renderWidth = width;
         renderHeight = height;
         LOGGER.info("[{}] render resolution {}x{} - enter {} as the tall resolution "
-                        + "in Ninjabrain Bot", MOD_ID, width, height, height);
+                + "in Ninjabrain Bot", MOD_ID, width, height, height);
+    }
+
+    /** Logged once: the driver's texture ceiling, which bounds the render height. */
+    public static void noteMaxTexture(int max) {
+        if (maxTextureReported) return;
+        maxTextureReported = true;
+        LOGGER.info("[{}] GL_MAX_TEXTURE_SIZE is {}", MOD_ID, max);
+    }
+
+    /**
+     * Logged once if the configured render size had to be reduced.
+     *
+     * <p>A warning, not a note: the ruler still counts real framebuffer pixels
+     * either way, but the figure for Ninjabrain Bot is now the clamped one, and
+     * using the configured one would be wrong by their ratio.
+     */
+    public static void noteTextureClamp(int requested, int clamped) {
+        if (clampReported) return;
+        clampReported = true;
+        LOGGER.warn("[{}] render size {} exceeds this GPU's texture limit; using {}. "
+                + "Enter {} in Ninjabrain Bot, not {}", MOD_ID, requested, clamped, clamped, requested);
     }
 
     /** Real surface width, before any mode override. */
@@ -324,41 +407,45 @@ public final class ToolscreenMobile implements ClientModInitializer {
     }
 
     /**
-     * The current layout, or null if one cannot be built for this screen.
-     *
-     * <p>Cached: it is read several times a frame and the arithmetic does not
-     * change unless the screen or the render width does.
+     * True to draw the panel in the letterboxed area beside the strip, where
+     * the Windows tool puts it, rather than over the game.
      */
-    public static Layout layout() {
-        int screenW = nativeWidth;
-        int screenH = nativeHeight;
-        int renderW = renderWidth;
-        if (screenW < 16 || screenH < 16 || renderW < 2) return null;
-
-        Layout cached = layout;
-        if (cached != null && cached.screenWidth == screenW && cached.screenHeight == screenH
-                && cached.gameWidth == Math.min(renderW, screenW)) {
-            return cached;
-        }
-        Layout built = Layout.compute(screenW, screenH, renderW);
-        layout = built;
-        return built;
+    public static boolean eyeZoomSide() {
+        return eyeZoomSide;
     }
 
     /**
-     * Logs the computed geometry once.
+     * Logs the surface and blit geometry once.
      *
-     * <p>Every number in the layout is derived, and when the panel once covered
-     * the game window there was no way to tell from a screenshot which input had
-     * been wrong. Printing the result settles it in one run.
+     * <p>The background fill paints the four bands around the strip, which is
+     * only correct if the blit rectangle and the surface size are in the same
+     * coordinate space. When the fill covered everything, those numbers were
+     * the missing evidence, and they cannot be obtained from a build machine.
      */
-    public static void notePanelGeometry(Layout value) {
-        if (panelReported || value == null) return;
-        panelReported = true;
-        LOGGER.info("[{}] layout: {}", MOD_ID, value);
-        if (value.overlapsGame()) {
-            LOGGER.warn("[{}] panel overlaps the game window - it will not be drawn", MOD_ID);
-        }
+    public static void noteSurfaceGeometry(int surfaceW, int surfaceH,
+                                           int blitX, int blitY, int blitW, int blitH) {
+        if (surfaceReported) return;
+        surfaceReported = true;
+        LOGGER.info("[{}] surface {}x{}, blit x={} y={} w={} h={}",
+                MOD_ID, surfaceW, surfaceH, blitX, blitY, blitW, blitH);
+    }
+
+    /**
+     * Logs which framebuffer was bound when the background tried to paint.
+     *
+     * <p>Zero is the screen, which is the only safe target. Anything else is
+     * Minecraft's own framebuffer, and painting there covers the world - the
+     * failure seen twice already.
+     */
+    public static void noteFramebufferBinding(int binding) {
+        if (bindingReported) return;
+        bindingReported = true;
+        LOGGER.info("[{}] background: framebuffer {} bound ({})",
+                MOD_ID, binding, binding == 0 ? "screen, painting" : "not the screen, skipping");
+    }
+
+    public static double fovScale() {
+        return fovScale;
     }
 
     public static boolean backgroundEnabled() {
@@ -452,10 +539,6 @@ public final class ToolscreenMobile implements ClientModInitializer {
         return !activeMode().isNative();
     }
 
-    public static int reportKey() {
-        return reportKey;
-    }
-
     public static int toggleKey() {
         return toggleKey;
     }
@@ -513,15 +596,28 @@ public final class ToolscreenMobile implements ClientModInitializer {
         crosshairEnabled = !"false".equalsIgnoreCase(String.valueOf(props.getProperty("crosshair")).trim());
         crosshairSize = clampInt(props.getProperty("crosshairSize"), crosshairSize, 1, 64);
         crosshairGap = clampInt(props.getProperty("crosshairGap"), crosshairGap, 0, 32);
+        crosshairVanilla = !"false".equalsIgnoreCase(
+                String.valueOf(props.getProperty("crosshairVanilla")).trim());
+        crosshairScale = clampDouble(props.getProperty("crosshairScale"), crosshairScale, 0.1, 8.0);
 
         eyeZoomModes = parseNameList(props.getProperty("eyezoomModes"), eyeZoomModes);
-        panelHeightFraction = clampDouble(props.getProperty("panelHeightFraction"), panelHeightFraction, 0.1, 1.0);
-        panelAspect = clampDouble(props.getProperty("panelAspect"), panelAspect, 0.1, 4.0);
-        rulerWidthFraction = clampDouble(props.getProperty("rulerWidthFraction"), rulerWidthFraction, 0.1, 1.0);
-        rulerHeightFraction = clampDouble(props.getProperty("rulerHeightFraction"), rulerHeightFraction, 0.005, 0.5);
-        rulerCells = clampInt(props.getProperty("rulerCells"), rulerCells, 2, 256);
-        if (rulerCells % 2 != 0) rulerCells--;
-        verticalStride = clampInt(props.getProperty("verticalStride"), verticalStride, 1, 64);
+        eyeZoomRegionWidth = clampInt(props.getProperty("eyezoomRegionWidth"), eyeZoomRegionWidth, 2, 256);
+        eyeZoomRegionHeight = clampInt(props.getProperty("eyezoomRegionHeight"), eyeZoomRegionHeight, 2, 256);
+        // eyezoomFactor stays as a single-value shorthand: it sets both axes,
+        // and the per-axis keys override it if also present.
+        int both = clampInt(props.getProperty("eyezoomFactor"), 0, 0, 256);
+        if (both > 0) {
+            eyeZoomFactorX = both;
+            eyeZoomFactorY = both;
+        }
+        eyeZoomFactorX = clampInt(props.getProperty("eyezoomFactorX"), eyeZoomFactorX, 1, 256);
+        eyeZoomFactorY = clampInt(props.getProperty("eyezoomFactorY"), eyeZoomFactorY, 1, 256);
+        eyeZoomRulerMax = clampInt(props.getProperty("eyezoomRulerMax"), eyeZoomRulerMax, 1, 128);
+        eyeZoomTop = clampDouble(props.getProperty("eyezoomTop"), eyeZoomTop, 0.0, 1.0);
+        eyeZoomLeft = clampDouble(props.getProperty("eyezoomLeft"), eyeZoomLeft, 0.0, 1.0);
+        eyeZoomSide = !"false".equalsIgnoreCase(String.valueOf(props.getProperty("eyezoomSide")).trim());
+
+        fovScale = clampDouble(props.getProperty("fovScale"), fovScale, 0.05, 1.0);
 
         backgroundEnabled = !"false".equalsIgnoreCase(String.valueOf(props.getProperty("background")).trim());
         backgroundTop = parseColour(props.getProperty("backgroundTop"), backgroundTop);
@@ -627,12 +723,17 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("crosshairSize", Integer.toString(crosshairSize));
         props.setProperty("crosshairGap", Integer.toString(crosshairGap));
         props.setProperty("eyezoomModes", String.join(", ", eyeZoomModes));
-        props.setProperty("panelHeightFraction", Double.toString(panelHeightFraction));
-        props.setProperty("panelAspect", Double.toString(panelAspect));
-        props.setProperty("rulerWidthFraction", Double.toString(rulerWidthFraction));
-        props.setProperty("rulerHeightFraction", Double.toString(rulerHeightFraction));
-        props.setProperty("rulerCells", Integer.toString(rulerCells));
-        props.setProperty("verticalStride", Integer.toString(verticalStride));
+        props.setProperty("eyezoomRegionWidth", Integer.toString(eyeZoomRegionWidth));
+        props.setProperty("eyezoomRegionHeight", Integer.toString(eyeZoomRegionHeight));
+        props.setProperty("eyezoomFactorX", Integer.toString(eyeZoomFactorX));
+        props.setProperty("eyezoomFactorY", Integer.toString(eyeZoomFactorY));
+        props.setProperty("eyezoomRulerMax", Integer.toString(eyeZoomRulerMax));
+        props.setProperty("eyezoomTop", Double.toString(eyeZoomTop));
+        props.setProperty("eyezoomLeft", Double.toString(eyeZoomLeft));
+        props.setProperty("eyezoomSide", Boolean.toString(eyeZoomSide));
+        props.setProperty("fovScale", Double.toString(fovScale));
+        props.setProperty("crosshairVanilla", Boolean.toString(crosshairVanilla));
+        props.setProperty("crosshairScale", Double.toString(crosshairScale));
         props.setProperty("reportKey", KeyCodes.nameOf(reportKey, Integer.toString(reportKey)));
         props.setProperty("configVersion", Integer.toString(CONFIG_VERSION));
         props.setProperty("background", Boolean.toString(backgroundEnabled));

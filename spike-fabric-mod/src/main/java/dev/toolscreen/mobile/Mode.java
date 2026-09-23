@@ -65,28 +65,18 @@ public record Mode(String name, double width, double height) {
      */
     private static final int MIN_USEFUL_PIXELS = 64;
 
-    /**
-     * Largest framebuffer dimension that will be asked for.
-     *
-     * <p>Eye Measure renders far taller than the screen on purpose, so there is
-     * no clamp to the display any more - but there is still a hard ceiling,
-     * because the framebuffer is a texture and asking for more than the driver
-     * allows fails the allocation rather than degrading. The real limit is
-     * queried at runtime; this is only a sanity bound on what a config file may
-     * ask for.
-     */
+    /** Sanity bound on what a config file may ask for; the driver's limit is lower. */
     public static final int MAX_PIXELS = 32768;
 
     /**
      * Converts one configured dimension into a concrete framebuffer size.
      *
-     * <p>Deliberately <em>not</em> clamped to the screen. Measuring depends on
-     * the render being much taller than the display: with the field of view
-     * fixed, angle per pixel is the vertical field divided by the render
-     * height, so a 16384-pixel render resolves an offset roughly eight times
-     * more finely than a 1940-pixel one. The framebuffer is an off-screen
-     * texture and has no reason to fit the monitor; only the visible crop of it
-     * does.
+     * <p>Deliberately not clamped to the screen. Eye Measure renders far taller
+     * than the display on purpose: with the field of view fixed, angle per pixel
+     * is the vertical field divided by the render height, so a 16384-row render
+     * resolves an offset about eight times more finely than a screen-height one.
+     * The framebuffer is an off-screen texture and has no reason to fit the
+     * monitor - only the visible crop of it does.
      */
     public static int resolve(int nativePixels, double value) {
         double raw = isFraction(value) ? nativePixels * value : value;
