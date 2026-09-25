@@ -9,11 +9,12 @@ import net.minecraft.text.LiteralText;
 /**
  * The settings menu, opened with comma.
  *
- * <p>Down to one control. The crop, the main zoom, the clone zoom and the two
- * stretch factors were all sliders until their right values were found on the
- * device; they are constants now. A setting that has exactly one correct value
- * is not a setting, and leaving it adjustable only invites it being moved to
- * something that reads plausibly and measures wrongly.
+ * <p>Three controls. The crop and the main zoom are constants - they have one
+ * correct value each, found on the device, and an adjustable one only invites
+ * being moved to something that reads plausibly and measures wrongly. The
+ * stretch is not like that: it trades how much of the frame the panel shows
+ * against how legible a pixel is, and which side of that trade is right depends
+ * on what is being measured.
  *
  * <h2>Why it is positioned the way it is</h2>
  *
@@ -31,7 +32,11 @@ public class ToolscreenScreen extends Screen {
      */
     private static final double MAX_SENSITIVITY = 0.5;
 
-    private static final int ROWS = 2;
+    /** Slider tops. X needs the range to stay legible; Y only needs context. */
+    private static final int MAX_STRETCH_X = 96;
+    private static final int MAX_STRETCH_Y = 24;
+
+    private static final int ROWS = 4;
     private static final int ROW_HEIGHT = 22;
     private static final int MAX_WIDGET_WIDTH = 200;
 
@@ -56,6 +61,10 @@ public class ToolscreenScreen extends Screen {
         int left = (this.width - widgetWidth) / 2;
         int y = firstRowY((int) Math.round(this.height * ToolscreenMobile.cropCentre()));
 
+        addButton(new StretchSlider(left, y, widgetWidth, 20, true));
+        y += ROW_HEIGHT;
+        addButton(new StretchSlider(left, y, widgetWidth, 20, false));
+        y += ROW_HEIGHT;
         addButton(new SensitivitySlider(left, y, widgetWidth, 20));
         y += ROW_HEIGHT;
         addButton(new ButtonWidget(left, y, widgetWidth, 20, new LiteralText("Done"),
@@ -92,6 +101,61 @@ public class ToolscreenScreen extends Screen {
     private void drawCentredLine(MatrixStack matrices, String text, int y) {
         int x = (this.width - this.textRenderer.getWidth(text)) / 2;
         this.textRenderer.drawWithShadow(matrices, text, x, y, 0xFFFFFF);
+    }
+
+    /**
+     * Screen pixels per framebuffer pixel, on one axis of the clone panel.
+     *
+     * <p>Shows the real figure rather than a factor with a multiplier applied
+     * elsewhere, so the number on the slider is the number of pixels drawn.
+     *
+     * <p>Because the panel is a fixed size, raising this shows less of the
+     * frame at a larger scale and lowering it shows more at a smaller one; it
+     * does not resize anything. The two axes are separate because the ruler
+     * counts horizontal offsets, so the horizontal figure is what has to be
+     * legible while the vertical one only buys context.
+     */
+    private class StretchSlider extends SliderWidget {
+
+        private final boolean horizontal;
+
+        StretchSlider(int x, int y, int width, int height, boolean horizontal) {
+            super(x, y, width, height, new LiteralText(""),
+                    toSlider(horizontal ? ToolscreenMobile.eyeZoomFactorX()
+                            : ToolscreenMobile.eyeZoomFactorY(), horizontal));
+            this.horizontal = horizontal;
+            updateMessage();
+        }
+
+        private int factor() {
+            int max = this.horizontal ? MAX_STRETCH_X : MAX_STRETCH_Y;
+            return Math.max(1, (int) Math.round(this.value * max));
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(new LiteralText(
+                    (this.horizontal ? "Stretch X  " : "Stretch Y  ") + factor() + " px"));
+        }
+
+        @Override
+        protected void applyValue() {
+            if (this.horizontal) {
+                ToolscreenMobile.setStretchX(factor());
+            } else {
+                ToolscreenMobile.setStretchY(factor());
+            }
+        }
+    }
+
+    /**
+     * Slider position for a stretch factor. Static because it is needed to build
+     * the slider's initial value, which is a {@code super(...)} argument - and
+     * an instance method cannot be called before the supertype constructor runs.
+     */
+    private static double toSlider(int factor, boolean horizontal) {
+        int max = horizontal ? MAX_STRETCH_X : MAX_STRETCH_Y;
+        return Math.max(0.0, Math.min(1.0, factor / (double) max));
     }
 
     /**
