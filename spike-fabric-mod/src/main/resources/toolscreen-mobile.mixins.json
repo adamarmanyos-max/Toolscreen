@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.toolscreen.mobile.mixin",
+  "compatibilityLevel": "JAVA_16",
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "client": [
+    "FramebufferMixin",
+    "GameRendererMixin",
+    "InGameHudMixin",
+    "MinecraftClientMixin",
+    "WindowMixin"
+  ]
+}
