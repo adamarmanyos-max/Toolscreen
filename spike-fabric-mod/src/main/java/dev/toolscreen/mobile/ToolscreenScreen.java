@@ -36,7 +36,10 @@ public class ToolscreenScreen extends Screen {
     private static final double MIN_STRETCH = 0.25;
     private static final double MAX_STRETCH = 2.0;
 
-    private static final int ROWS = 3;
+    /** Main zoom range. 1.0 is vanilla; the GPU's limits cap the top further. */
+    private static final double MAX_MAIN_ZOOM = 16.0;
+
+    private static final int ROWS = 4;
     private static final int ROW_HEIGHT = 22;
     private static final int MAX_WIDGET_WIDTH = 200;
 
@@ -61,6 +64,8 @@ public class ToolscreenScreen extends Screen {
         int left = (this.width - widgetWidth) / 2;
         int y = firstRowY((int) Math.round(this.height * ToolscreenMobile.cropCentre()));
 
+        addButton(new MainZoomSlider(left, y, widgetWidth, 20));
+        y += ROW_HEIGHT;
         addButton(new StretchSlider(left, y, widgetWidth, 20));
         y += ROW_HEIGHT;
         addButton(new SensitivitySlider(left, y, widgetWidth, 20));
@@ -107,6 +112,53 @@ public class ToolscreenScreen extends Screen {
     private void drawCentredLine(MatrixStack matrices, String text, int y) {
         int x = (this.width - this.textRenderer.getWidth(text)) / 2;
         this.textRenderer.drawWithShadow(matrices, text, x, y, 0xFFFFFF);
+    }
+
+    /**
+     * How much taller than the screen the game renders - the main screen's zoom.
+     *
+     * <p>Applied on release rather than while dragging: each change reallocates
+     * a framebuffer that can be tens of megabytes, and doing that every frame of
+     * a drag would stall the game rather than preview anything.
+     *
+     * <p>Unlike the stretch below, this is not cosmetic. It sets the render
+     * height, which is the figure Ninjabrain Bot needs - so the label shows the
+     * resulting height, and that number has to be re-entered there whenever
+     * this moves.
+     */
+    private class MainZoomSlider extends SliderWidget {
+
+        MainZoomSlider(int x, int y, int width, int height) {
+            super(x, y, width, height, new LiteralText(""),
+                    (ToolscreenMobile.mainZoom() - 1.0) / (MAX_MAIN_ZOOM - 1.0));
+            updateMessage();
+        }
+
+        private double zoom() {
+            return 1.0 + this.value * (MAX_MAIN_ZOOM - 1.0);
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(new LiteralText(String.format("Main zoom  %.1fx  (%d px)",
+                    zoom(), ToolscreenMobile.renderHeight())));
+        }
+
+        @Override
+        protected void applyValue() {
+            ToolscreenMobile.setMainZoom(zoom());
+        }
+
+        @Override
+        public void onRelease(double mouseX, double mouseY) {
+            super.onRelease(mouseX, mouseY);
+            if (client != null) {
+                // Rebuilds the render target at the new height; nothing re-reads
+                // the reported size until a resize happens.
+                client.onResolutionChanged();
+            }
+            updateMessage();
+        }
     }
 
     /**

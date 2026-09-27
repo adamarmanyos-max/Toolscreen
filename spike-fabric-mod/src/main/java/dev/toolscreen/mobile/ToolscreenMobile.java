@@ -41,7 +41,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * these numbers are still being fitted against the original screenshot by
      * screenshot; it stops once the shape settles.
      */
-    private static final int CONFIG_VERSION = 11;
+    private static final int CONFIG_VERSION = 12;
     static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
     /**
@@ -255,7 +255,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * <p>1.0 is vanilla. The ceiling is whatever the GPU's texture and viewport
      * limits allow, which {@link GlLimits} applies and logs.
      */
-    private static final double MAIN_ZOOM = 8.0;
+    private static volatile double mainZoom = 8.0;
 
     /**
      * Horizontal scale of the game view on screen, correcting its aspect.
@@ -434,7 +434,11 @@ public final class ToolscreenMobile implements ClientModInitializer {
     }
 
     public static double mainZoom() {
-        return MAIN_ZOOM;
+        return mainZoom;
+    }
+
+    public static void setMainZoom(double value) {
+        mainZoom = Math.max(1.0, Math.min(16.0, value));
     }
 
 
@@ -449,7 +453,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
     public static int resolveRenderHeight(Mode mode, int nativeHeight) {
         int base = mode.resolveHeight(nativeHeight);
         if (!eyeZoomActive()) return base;
-        long scaled = Math.round(base * MAIN_ZOOM);
+        long scaled = Math.round(base * mainZoom);
         return (int) Math.min(scaled, Mode.MAX_PIXELS);
     }
 
@@ -864,6 +868,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         crosshairScale = clampDouble(props.getProperty("crosshairScale"), crosshairScale, 0.1, 8.0);
         measureSensitivity = clampDouble(props.getProperty("measureSensitivity"), measureSensitivity, 0.001, 1.0);
         mainStretch = clampDouble(props.getProperty("mainStretch"), mainStretch, 0.25, 4.0);
+        mainZoom = clampDouble(props.getProperty("mainZoom"), mainZoom, 1.0, 16.0);
         panelHeightFraction = clampDouble(props.getProperty("panelHeightFraction"), panelHeightFraction, 0.1, 1.0);
         panelAspect = clampDouble(props.getProperty("panelAspect"), panelAspect, 0.1, 4.0);
 
@@ -990,6 +995,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("crosshairScale", Double.toString(crosshairScale));
         props.setProperty("measureSensitivity", Double.toString(measureSensitivity));
         props.setProperty("mainStretch", Double.toString(mainStretch));
+        props.setProperty("mainZoom", Double.toString(mainZoom));
         props.setProperty("panelHeightFraction", Double.toString(panelHeightFraction));
         props.setProperty("panelAspect", Double.toString(panelAspect));
         props.setProperty("reportKey", KeyCodes.nameOf(reportKey, Integer.toString(reportKey)));
