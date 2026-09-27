@@ -41,7 +41,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * these numbers are still being fitted against the original screenshot by
      * screenshot; it stops once the shape settles.
      */
-    private static final int CONFIG_VERSION = 13;
+    private static final int CONFIG_VERSION = 14;
     static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
     /**
@@ -79,8 +79,12 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile int activeIndex = 0;
     private static volatile int toggleKey = DEFAULT_TOGGLE_KEY;
 
-    /** Prints the measurement check. Default M, which vanilla leaves unbound. */
-    private static volatile int reportKey = 77;
+    /**
+     * Prints the measurement check. Default semicolon, which vanilla leaves
+     * unbound. It used to be M, which Stronghold Finder uses to switch between
+     * its measuring and travel settings - one press did both.
+     */
+    private static volatile int reportKey = 59;
 
     /** Opens the settings menu. Default comma, which vanilla leaves unbound. */
     private static volatile int menuKey = 44;
@@ -98,8 +102,8 @@ public final class ToolscreenMobile implements ClientModInitializer {
     /**
      * The framebuffer size actually in use, as last reported to Minecraft.
      *
-     * <p>Recorded rather than recomputed: it is the number that has to be typed
-     * into Ninjabrain Bot's tall-resolution box, and a figure derived a second
+     * <p>Recorded rather than recomputed: degrees per pixel is worked out from
+     * it (see {@code Measurement}), and a figure derived a second
      * time from the config is one that can disagree with what the game is really
      * rendering at. This is what the game got.
      */
@@ -357,7 +361,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
     /** Writes the current settings back to the config file. */
     public static void save() {
-        writeDefaultConfig(FabricLoader.getInstance().getConfigDir().resolve(MOD_ID + ".properties"));
+        writeConfig(FabricLoader.getInstance().getConfigDir().resolve(MOD_ID + ".properties"));
     }
 
     /** The panel's fixed width in real pixels, or 0 before the screen is known. */
@@ -593,7 +597,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         return renderWidth;
     }
 
-    /** Framebuffer height actually in use - the number Ninjabrain Bot wants. */
+    /** Framebuffer height actually in use. */
     public static int renderHeight() {
         return renderHeight;
     }
@@ -619,8 +623,10 @@ public final class ToolscreenMobile implements ClientModInitializer {
         if (width == renderWidth && height == renderHeight) return;
         renderWidth = width;
         renderHeight = height;
-        LOGGER.info("[{}] render resolution {}x{} - enter {} as the tall resolution "
-                + "in Ninjabrain Bot", MOD_ID, width, height, height);
+        // Not "enter this in Ninjabrain Bot": Ninjabrain assumes a 30 degree
+        // FOV, and Eye Measure narrows it, so the height alone is the wrong
+        // figure. The measurement report (reportKey) prints the right one.
+        LOGGER.info("[{}] render resolution {}x{}", MOD_ID, width, height);
     }
 
     /**
@@ -669,8 +675,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         if (clampReported) return;
         clampReported = true;
         LOGGER.warn("[{}] render size {} exceeds this GPU's texture or viewport limit; "
-                + "using {}. Enter {} in Ninjabrain Bot, not {}",
-                MOD_ID, requested, clamped, clamped, requested);
+                + "using {}", MOD_ID, requested, clamped);
     }
 
     /** Real surface width, before any mode override. */
@@ -723,6 +728,15 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
     public static double fovScale() {
         return fovScale;
+    }
+
+    /**
+     * The factor applied to the game's FOV right now: fovScale in an EyeZoom
+     * mode, 1.0 otherwise. Anything converting pixels to degrees needs this,
+     * because the angle one pixel covers depends on the FOV actually rendered.
+     */
+    public static double fovMultiplier() {
+        return isOverrideActive() && eyeZoomActive() ? fovScale : 1.0;
     }
 
     public static boolean backgroundEnabled() {
@@ -818,6 +832,41 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
     public static int toggleKey() {
         return toggleKey;
+    }
+
+    /**
+     * Switches straight to the first EyeZoom mode, or back to native. For other
+     * mods (see {@code ToolscreenApi}); the caller triggers the resize. Returns
+     * false when the config has no such mode.
+     */
+    public static boolean setEyeMeasure(boolean on) {
+        List<Mode> current = modes;
+        for (int i = 0; i < current.size(); i++) {
+            Mode mode = current.get(i);
+            boolean wanted = on ? !mode.isNative() && isEyeZoomName(mode.name()) : mode.isNative();
+            if (wanted) {
+                activeIndex = i;
+                LOGGER.info("[{}] mode -> {} (requested by another mod)", MOD_ID, mode.name());
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isEyeZoomName(String name) {
+        for (String candidate : eyeZoomModes) {
+            if (candidate.equalsIgnoreCase(name)) return true;
+        }
+        return false;
+    }
+
+    private static volatile boolean sidePanelFailureReported;
+
+    /** Logged once: a side panel registered by another mod threw while drawing. */
+    public static void noteSidePanelFailure(RuntimeException e) {
+        if (sidePanelFailureReported) return;
+        sidePanelFailureReported = true;
+        LOGGER.warn("[{}] a side panel from another mod failed to draw", MOD_ID, e);
     }
 
     /**
@@ -917,7 +966,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
                 return;
             }
         } else {
-            writeDefaultConfig(file);
+            writeConfig(file);
             return;
         }
 
@@ -926,7 +975,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
             LOGGER.info("[{}] config at {} is version {}, this build expects {} - "
                             + "replacing it with this build's defaults",
                     MOD_ID, file, version, CONFIG_VERSION);
-            writeDefaultConfig(file);
+            writeConfig(file);
             return;
         }
 
@@ -1045,17 +1094,25 @@ public final class ToolscreenMobile implements ClientModInitializer {
         return parsed;
     }
 
-    private static void writeDefaultConfig(Path file) {
+    /**
+     * Writes the settings currently in effect. On first launch, or when an
+     * older file is replaced, those are this build's defaults.
+     *
+     * <p>It used to write the default modes, toggle key and alignment every
+     * time, so pressing Done in the settings menu quietly threw away any modes
+     * or key edited into the file by hand.
+     */
+    private static void writeConfig(Path file) {
         StringBuilder modeList = new StringBuilder();
-        for (Mode mode : DEFAULT_MODES) {
+        for (Mode mode : modes) {
             if (modeList.length() > 0) modeList.append(", ");
             modeList.append(mode.name()).append(':')
                     .append(mode.width()).append('x').append(mode.height());
         }
 
         Properties props = new Properties();
-        props.setProperty("toggleKey", KeyCodes.nameOf(DEFAULT_TOGGLE_KEY, Integer.toString(DEFAULT_TOGGLE_KEY)));
-        props.setProperty("align", Align.CENTER.name());
+        props.setProperty("toggleKey", KeyCodes.nameOf(toggleKey, Integer.toString(toggleKey)));
+        props.setProperty("align", align.name());
         props.setProperty("modes", modeList.toString());
         props.setProperty("crosshair", Boolean.toString(crosshairEnabled));
         props.setProperty("crosshairSize", Integer.toString(crosshairSize));

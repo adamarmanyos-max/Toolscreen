@@ -21,6 +21,10 @@ import net.minecraft.text.LiteralText;
  * ruler really is counting framebuffer pixels; if it is out by a constant
  * factor, that factor is the ratio between the real render height and the
  * configured one.
+ *
+ * <p>{@code fovVertical} is the FOV actually rendered. In an EyeZoom mode that
+ * is the setting times {@link ToolscreenMobile#fovMultiplier()}, not the
+ * setting: using the setting alone made every prediction here twice too small.
  */
 public final class Measurement {
 
@@ -43,6 +47,20 @@ public final class Measurement {
         return f * Math.tan(Math.toRadians(yawDegrees));
     }
 
+    /** The FOV actually rendered, in degrees: the setting times Toolscreen's narrowing. */
+    public static double renderedFov(MinecraftClient client) {
+        return client.options.fov * ToolscreenMobile.fovMultiplier();
+    }
+
+    /**
+     * Degrees one framebuffer pixel covers at the crosshair, or 0 when unknown.
+     * One ruler cell, and one of Stronghold Finder's pixel adjustments.
+     */
+    public static double degreesPerPixel(MinecraftClient client) {
+        double f = focalLength(client.getWindow().getFramebufferHeight(), renderedFov(client));
+        return f <= 0.0 ? 0.0 : Math.toDegrees(Math.atan(1.0 / f));
+    }
+
     /**
      * Prints the prediction table into chat and the log.
      *
@@ -54,7 +72,7 @@ public final class Measurement {
     public static void report(MinecraftClient client) {
         int height = ToolscreenMobile.renderHeight();
         int width = ToolscreenMobile.renderWidth();
-        double fov = client.options.fov;
+        double fov = renderedFov(client);
 
         StringBuilder out = new StringBuilder();
         out.append("Toolscreen measurement check\n");
@@ -68,6 +86,12 @@ public final class Measurement {
 
         double f = focalLength(height, fov);
         out.append(String.format("  f = (%d/2) / tan(%.1f/2) = %.1f px\n", height, fov, f));
+        double perPixel = Math.toDegrees(Math.atan(1.0 / f));
+        out.append(String.format("  1 cell = %.5f deg at the crosshair\n", perPixel));
+        // Ninjabrain Bot's pixel hotkeys use atan(2 tan(15 deg) / H): a 30 degree
+        // FOV is baked in, so it needs the height that gives the same angle at 30.
+        double ninjabrainHeight = 2.0 * Math.tan(Math.toRadians(15.0)) / Math.tan(Math.toRadians(perPixel));
+        out.append(String.format("  Ninjabrain Bot tall resolution: %d (it assumes FOV 30)\n", Math.round(ninjabrainHeight)));
 
         if (client.player != null) {
             double yaw = client.player.getYaw(1.0F);

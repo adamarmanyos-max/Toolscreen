@@ -9,7 +9,10 @@ import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import org.lwjgl.opengl.GL11;
 
+import dev.toolscreen.mobile.api.ToolscreenApi;
 import java.nio.ByteBuffer;
+import java.util.List;
+import java.util.function.BiConsumer;
 
 /**
  * Toolscreen's EyeZoom, ported: a magnified clone of the pixels around the
@@ -486,36 +489,90 @@ public final class EyeZoom {
      * is aligned left or right rather than centred.
      */
     public static void renderSide(int blitX, int blitY, int blitW, int blitH) {
-        if (!ToolscreenMobile.eyeZoomActive()) return;
+        if (!ToolscreenMobile.isOverrideActive()) return;
         if (blitW < 2 || blitH < 2) return;
-        if (!ToolscreenMobile.eyeZoomSide()) return;
         if (hookSeen) {
             if (!armed) return;
             armed = false;
         }
 
-        final int[] pixels = lastPixels;
-        if (pixels == null) return;
-
         int realW = ToolscreenMobile.nativeWidth();
         int realH = ToolscreenMobile.nativeHeight();
         if (realW < 2 || realH < 2) return;
 
-        final int regionW = lastRegionW;
-        final int regionH = lastRegionH;
-        if (regionW < 2 || regionH < 1) return;
-
         // The bands either side of the game window, in real screen pixels.
         int leftBox = blitX;
         int rightBox = realW - (blitX + blitW);
-        boolean useLeft = leftBox >= rightBox;
-        int boxStart = useLeft ? 0 : blitX + blitW;
-        int boxWidth = useLeft ? leftBox : rightBox;
-
+        boolean zoomLeft = leftBox >= rightBox;
         int margin = Math.max(8, realW / 120);
+
+        final int[] zoomPanel = ToolscreenMobile.eyeZoomActive() && ToolscreenMobile.eyeZoomSide()
+                ? zoomPanelGeometry(blitX, blitW, realW, realH, zoomLeft, margin)
+                : null;
+
+        // Other mods get the band the zoom panel is not using; with no zoom
+        // panel, the wider one. Stronghold Finder draws its results here, since
+        // its HUD panel would sit in the cropped-away part of the tall render.
+        List<BiConsumer<MatrixStack, int[]>> panels = ToolscreenApi.sidePanels();
+        boolean panelLeft = zoomPanel != null ? !zoomLeft : zoomLeft;
+        int panelBoxStart = panelLeft ? 0 : blitX + blitW;
+        int panelBoxWidth = panelLeft ? leftBox : rightBox;
+        final int[] sideBox = {panelBoxStart + margin, margin, panelBoxWidth - 2 * margin, realH - 2 * margin};
+        final boolean drawPanels = !panels.isEmpty() && sideBox[2] >= 64 && sideBox[3] >= 64;
+
+        final int[] pixels = lastPixels;
+        final int regionW = lastRegionW;
+        final int regionH = lastRegionH;
+
+        withFullSurface(blitX, blitY, blitW, blitH, () -> {
+            MatrixStack matrices = new MatrixStack();
+            if (zoomPanel != null) {
+                int panelX = zoomPanel[0], panelY = zoomPanel[1], panelW = zoomPanel[2], panelH = zoomPanel[3];
+                int zoomX = ToolscreenMobile.effectiveZoomX();
+                int zoomY = ToolscreenMobile.effectiveZoomY();
+                int rulerH = clamp(zoomX, 12, Math.max(12, panelH / 6));
+                // Painted first, at the fixed size, so the panel keeps its outline
+                // even where the magnified image does not divide into it exactly.
+                DrawableHelper.fill(matrices, panelX, panelY, panelX + panelW, panelY + panelH, 0xFF101014);
+                drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, panelW, panelH, zoomX, zoomY);
+                drawRuler(matrices, panelX, panelY, panelW, panelH, zoomX, rulerH);
+                drawCentreLine(matrices, panelX, panelY, panelW, panelH);
+            }
+            // Every non-native mode, not just the EyeZoom ones: the vanilla
+            // crosshair is hidden whenever a mode is active, so Thin and Wide
+            // used to have none at all.
+            drawCrosshair(matrices, blitX, blitY, blitW, blitH);
+
+            if (drawPanels) {
+                // Text is drawn with depth testing on, and this default
+                // framebuffer's depth is never cleared by Minecraft - its own
+                // rendering all goes into the offscreen target.
+                RenderSystem.clearDepth(1.0);
+                RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, MinecraftClient.IS_SYSTEM_MAC);
+                for (BiConsumer<MatrixStack, int[]> panel : panels) {
+                    try {
+                        panel.accept(new MatrixStack(), sideBox.clone());
+                    } catch (RuntimeException e) {
+                        ToolscreenMobile.noteSidePanelFailure(e);
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Where the zoom panel goes, as {x, y, width, height} in real screen
+     * pixels, or null when it cannot be drawn.
+     */
+    private static int[] zoomPanelGeometry(int blitX, int blitW, int realW, int realH, boolean useLeft, int margin) {
+        if (lastPixels == null) return null;
+        if (lastRegionW < 2 || lastRegionH < 1) return null;
+
+        int boxStart = useLeft ? 0 : blitX + blitW;
+        int boxWidth = useLeft ? blitX : realW - (blitX + blitW);
         int availW = boxWidth - 2 * margin;
         int availH = realH - 2 * margin;
-        if (availW < 32 || availH < 32) return;
+        if (availW < 32 || availH < 32) return null;
 
         // A fixed size, not one derived from the zoom.
         //
@@ -524,17 +581,17 @@ public final class EyeZoom {
         // Its size is now a property of the screen and the zoom only decides how
         // much of the frame appears inside it: less zoom shows more of the eye,
         // rather than a smaller picture of the same amount.
-        final int panelW = Math.min(availW,
+        int panelW = Math.min(availW,
                 (int) Math.round(realH * ToolscreenMobile.panelHeightFraction()
                         * ToolscreenMobile.panelAspect()));
-        final int panelH = Math.min(availH,
+        int panelH = Math.min(availH,
                 (int) Math.round(realH * ToolscreenMobile.panelHeightFraction()));
-        if (panelW < 32 || panelH < 32) return;
+        if (panelW < 32 || panelH < 32) return null;
 
-        final int panelX = useLeft
+        int panelX = useLeft
                 ? clamp(boxStart + margin + (availW - panelW) / 2, 0, blitX - panelW)
                 : clamp(boxStart + margin + (availW - panelW) / 2, blitX + blitW, realW - panelW);
-        final int panelY = clamp((int) (realH * ToolscreenMobile.eyeZoomTop()) - panelH / 2,
+        int panelY = clamp((int) (realH * ToolscreenMobile.eyeZoomTop()) - panelH / 2,
                 margin, realH - margin - panelH);
 
         ToolscreenMobile.notePanelGeometry(realW, realH, blitX, blitW, panelX, panelY, panelW, panelH);
@@ -545,23 +602,9 @@ public final class EyeZoom {
         // the thing being measured, which is worse than showing no panel.
         if (panelX < blitX + blitW && panelX + panelW > blitX) {
             ToolscreenMobile.notePanelSuppressed(panelX, panelW, blitX, blitW);
-            return;
+            return null;
         }
-
-        final int zoomX = ToolscreenMobile.effectiveZoomX();
-        final int zoomY = ToolscreenMobile.effectiveZoomY();
-        final int rulerH = clamp(zoomX, 12, Math.max(12, panelH / 6));
-
-        withFullSurface(blitX, blitY, blitW, blitH, () -> {
-            MatrixStack matrices = new MatrixStack();
-            // Painted first, at the fixed size, so the panel keeps its outline
-            // even where the magnified image does not divide into it exactly.
-            DrawableHelper.fill(matrices, panelX, panelY, panelX + panelW, panelY + panelH, 0xFF101014);
-            drawPixels(matrices, pixels, regionW, regionH, panelX, panelY, panelW, panelH, zoomX, zoomY);
-            drawRuler(matrices, panelX, panelY, panelW, panelH, zoomX, rulerH);
-            drawCentreLine(matrices, panelX, panelY, panelW, panelH);
-            drawCrosshair(matrices, blitX, blitY, blitW, blitH);
-        });
+        return new int[]{panelX, panelY, panelW, panelH};
     }
 
     /** How many framebuffer columns the panel can show at the current zoom. */

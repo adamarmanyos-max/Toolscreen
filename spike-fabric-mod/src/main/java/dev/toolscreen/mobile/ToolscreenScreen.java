@@ -130,7 +130,7 @@ public class ToolscreenScreen extends Screen {
         int top = firstRowY();
         drawCentredLine(matrices,
                 ToolscreenMobile.renderWidth() + "x" + ToolscreenMobile.renderHeight(), top - 22);
-        drawCentredLine(matrices, "Ninjabrain: " + ToolscreenMobile.renderHeight(), top - 11);
+        drawCentredLine(matrices, String.format("1 px = %.5f deg", Measurement.degreesPerPixel(client)), top - 11);
         super.render(matrices, mouseX, mouseY, delta);
     }
 

@@ -26,8 +26,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * hidden. That is why the 2D drawing here lands in the right place without
  * setting up a projection of its own.
  *
- * <p>This mixin also narrows the field of view while a mode is active, which
- * is what magnifies the game view itself.
+ * <p>This mixin also narrows the field of view while an EyeZoom mode is
+ * active, which is what magnifies the game view itself.
  *
  * <p>{@code require = 0} on both: a measuring aid that fails to attach should
  * cost the measurement, not a launchable game. {@code EyeZoom} logs when it
@@ -51,6 +51,12 @@ public abstract class GameRendererMixin {
     // covers a smaller angle, so the eye's offset resolves more finely - which
     // is the number being fed to Ninjabrain Bot.
     //
+    // The angle a pixel covers depends on the narrowed value, so anything turning
+    // a pixel count into degrees must use ToolscreenMobile.fovMultiplier() -
+    // Measurement and Stronghold Finder do. Ninjabrain Bot cannot: it assumes a
+    // 30 degree FOV, which is why the measurement report prints an adjusted
+    // tall-resolution figure for it rather than the render height.
+    //
     // Minecraft's own slider stops at 30 degrees. Scaling the computed value
     // goes below that without touching the setting, and leaves the player's
     // configured FOV intact for when the override is off.
@@ -63,9 +69,11 @@ public abstract class GameRendererMixin {
             at = @At("RETURN"), cancellable = true, require = 0)
     private void toolscreen$narrowFov(Camera camera, float tickDelta, boolean changingFov,
                                       CallbackInfoReturnable<Double> cir) {
-        if (!ToolscreenMobile.isOverrideActive()) return;
+        // EyeZoom modes only. Thin and Wide are for playing, not measuring, and
+        // a half-width view there only made them harder to use.
+        if (ToolscreenMobile.fovMultiplier() == 1.0) return;
         double original = cir.getReturnValue();
-        double scaled = original * ToolscreenMobile.fovScale();
+        double scaled = original * ToolscreenMobile.fovMultiplier();
         ToolscreenMobile.noteFovActive(original, scaled);
         cir.setReturnValue(scaled);
     }
