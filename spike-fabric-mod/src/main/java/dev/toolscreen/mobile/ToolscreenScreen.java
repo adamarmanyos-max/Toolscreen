@@ -32,9 +32,9 @@ public class ToolscreenScreen extends Screen {
      */
     private static final double MAX_SENSITIVITY = 0.5;
 
-    /** Main-screen stretch range. 1.0 is uncorrected; the measured fault is ~1.5. */
-    private static final double MIN_STRETCH = 0.5;
-    private static final double MAX_STRETCH = 2.5;
+    /** Main-screen stretch range. 1.0 is uncorrected; the measured fault wants ~0.66. */
+    private static final double MIN_STRETCH = 0.25;
+    private static final double MAX_STRETCH = 2.0;
 
     private static final int ROWS = 3;
     private static final int ROW_HEIGHT = 22;
@@ -110,9 +110,9 @@ public class ToolscreenScreen extends Screen {
     }
 
     /**
-     * The main screen's vertical scale.
+     * The main screen's horizontal scale.
      *
-     * <p>Above 1 makes the view taller, which is the direction that undoes a
+     * <p>Below 1 narrows the view, which is the direction that undoes a
      * horizontal stretch. Applied as it is dragged: it only changes a viewport,
      * so unlike the render height there is nothing expensive to rebuild.
      *
@@ -134,7 +134,7 @@ public class ToolscreenScreen extends Screen {
 
         @Override
         protected void updateMessage() {
-            setMessage(new LiteralText(String.format("Main stretch  %.2fx", stretch())));
+            setMessage(new LiteralText(String.format("Main stretch X  %.2fx", stretch())));
         }
 
         @Override

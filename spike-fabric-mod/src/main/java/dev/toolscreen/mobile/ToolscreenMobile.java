@@ -258,7 +258,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static final double MAIN_ZOOM = 8.0;
 
     /**
-     * Vertical scale of the game view on screen, correcting its aspect.
+     * Horizontal scale of the game view on screen, correcting its aspect.
      *
      * <p>The view comes out stretched horizontally on this hardware - measured
      * off a screenshot, an eye of ender's texels were 33.5 pixels wide against
@@ -267,10 +267,11 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * already in place. Since that did not settle it and three attempts to
      * explain it from the symptom were wrong, this corrects the result directly.
      *
-     * <p>Applied to the blit's height rather than its width, so the game window
-     * keeps its width and only what fills it changes shape. Purely cosmetic: the
-     * ruler counts pixels sampled from the framebuffer, which this never
-     * touches, so no value here can make a reading wrong - only ugly.
+     * <p>Applied to the blit's width, so the window narrows or widens around its
+     * centre while the height and the crop stay as they were. Below 1 undoes a
+     * horizontal stretch. Purely cosmetic: the ruler counts pixels sampled from
+     * the framebuffer, which this never touches, so no value here can make a
+     * reading wrong - only ugly.
      */
     private static volatile double mainStretch = 1.0;
 

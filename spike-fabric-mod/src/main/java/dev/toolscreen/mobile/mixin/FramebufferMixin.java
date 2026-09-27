@@ -2,7 +2,6 @@ package dev.toolscreen.mobile.mixin;
 
 import com.mojang.blaze3d.platform.GlStateManager;
 import dev.toolscreen.mobile.EyeZoom;
-import dev.toolscreen.mobile.GlLimits;
 import dev.toolscreen.mobile.ToolscreenMobile;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.Framebuffer;
@@ -91,36 +90,30 @@ public abstract class FramebufferMixin {
             return;
         }
 
-        lastBlitX = stripX;
+        // The main-screen stretch scales the drawn width. The window is
+        // re-centred on the same point, so it widens or narrows symmetrically
+        // and the crosshair stays where it was; the recorded blit rectangle
+        // follows, so the background, the panel and its overlap guard all see
+        // the window at the width it is actually drawn.
+        int drawnW = (int) Math.round(width * ToolscreenMobile.mainStretch());
+        if (drawnW < 2) drawnW = width;
+        int drawnX = stripX + (width - drawnW) / 2;
+
+        lastBlitX = drawnX;
         lastBlitY = 0;
-        lastBlitW = width;
+        lastBlitW = drawnW;
         lastBlitH = Math.min(height, screenH > 0 ? screenH : height);
 
-        // Which framebuffer row lands at the screen's centre. At the default
-        // that is the middle one, which is where the crosshair is; the setting
-        // exists because a driver that clamps this oversized viewport puts the
-        // crop somewhere else, and the result is a view cut off at one edge
-        // only rather than trimmed evenly.
-        // The main-screen stretch scales the drawn height, correcting the view's
-        // aspect without narrowing the game window. The crop anchor is taken as
-        // a fraction of that drawn height, so the same framebuffer row stays at
-        // the centre of the screen whatever the stretch is.
-        //
-        // Clamped to the viewport limit: past it the driver clamps silently, and
-        // a clamped viewport moves the crop - which would trade one fault for
-        // the one this setting exists to work around.
-        int drawnH = (int) Math.round(height * ToolscreenMobile.mainStretch());
-        int maxViewport = GlLimits.maxViewportHeight();
-        if (maxViewport > 0 && drawnH > maxViewport) drawnH = maxViewport;
-        if (drawnH < 2) drawnH = height;
-
+        // Which framebuffer row lands at the screen's centre. Centred should
+        // mean 0.5, but on this hardware it does not land there, so the value is
+        // the one found on the device - see ToolscreenMobile.CROP_CENTRE.
         int vy = y;
         if (screenH > 0) {
-            int anchor = (int) Math.round(drawnH * ToolscreenMobile.cropCentre());
+            int anchor = (int) Math.round(height * ToolscreenMobile.cropCentre());
             vy = screenH / 2 - anchor;
         }
-        ToolscreenMobile.noteCrop(screenH, drawnH, vy);
-        GlStateManager.viewport(stripX, vy, width, drawnH);
+        ToolscreenMobile.noteCrop(screenH, height, vy);
+        GlStateManager.viewport(drawnX, vy, drawnW, height);
     }
 
     /**
