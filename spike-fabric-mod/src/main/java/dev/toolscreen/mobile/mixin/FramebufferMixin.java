@@ -2,6 +2,7 @@ package dev.toolscreen.mobile.mixin;
 
 import com.mojang.blaze3d.platform.GlStateManager;
 import dev.toolscreen.mobile.EyeZoom;
+import dev.toolscreen.mobile.GlLimits;
 import dev.toolscreen.mobile.ToolscreenMobile;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.Framebuffer;
@@ -100,13 +101,26 @@ public abstract class FramebufferMixin {
         // exists because a driver that clamps this oversized viewport puts the
         // crop somewhere else, and the result is a view cut off at one edge
         // only rather than trimmed evenly.
+        // The main-screen stretch scales the drawn height, correcting the view's
+        // aspect without narrowing the game window. The crop anchor is taken as
+        // a fraction of that drawn height, so the same framebuffer row stays at
+        // the centre of the screen whatever the stretch is.
+        //
+        // Clamped to the viewport limit: past it the driver clamps silently, and
+        // a clamped viewport moves the crop - which would trade one fault for
+        // the one this setting exists to work around.
+        int drawnH = (int) Math.round(height * ToolscreenMobile.mainStretch());
+        int maxViewport = GlLimits.maxViewportHeight();
+        if (maxViewport > 0 && drawnH > maxViewport) drawnH = maxViewport;
+        if (drawnH < 2) drawnH = height;
+
         int vy = y;
         if (screenH > 0) {
-            int anchor = (int) Math.round(height * ToolscreenMobile.cropCentre());
+            int anchor = (int) Math.round(drawnH * ToolscreenMobile.cropCentre());
             vy = screenH / 2 - anchor;
         }
-        ToolscreenMobile.noteCrop(screenH, height, vy);
-        GlStateManager.viewport(stripX, vy, width, height);
+        ToolscreenMobile.noteCrop(screenH, drawnH, vy);
+        GlStateManager.viewport(stripX, vy, width, drawnH);
     }
 
     /**

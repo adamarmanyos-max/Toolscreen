@@ -9,11 +9,12 @@ import net.minecraft.text.LiteralText;
 /**
  * The settings menu, opened with comma.
  *
- * <p>Down to one control. The crop, the main zoom, the clone zoom and the two
- * stretch factors were all sliders until their right values were found on the
- * device; they are constants now. A setting that has exactly one correct value
- * is not a setting, and leaving it adjustable only invites it being moved to
- * something that reads plausibly and measures wrongly.
+ * <p>Two controls. The crop, the main zoom and the clone panel's stretch are
+ * constants - each has one correct value, found on the device, and an
+ * adjustable one only invites being moved to something that reads plausibly
+ * and measures wrongly. What is left is the main screen's stretch, which
+ * corrects a fault whose cause is still unknown, and the aim sensitivity, which
+ * is a matter of preference.
  *
  * <h2>Why it is positioned the way it is</h2>
  *
@@ -31,7 +32,11 @@ public class ToolscreenScreen extends Screen {
      */
     private static final double MAX_SENSITIVITY = 0.5;
 
-    private static final int ROWS = 2;
+    /** Main-screen stretch range. 1.0 is uncorrected; the measured fault is ~1.5. */
+    private static final double MIN_STRETCH = 0.5;
+    private static final double MAX_STRETCH = 2.5;
+
+    private static final int ROWS = 3;
     private static final int ROW_HEIGHT = 22;
     private static final int MAX_WIDGET_WIDTH = 200;
 
@@ -42,7 +47,7 @@ public class ToolscreenScreen extends Screen {
     /**
      * The world keeps rendering and ticking behind this.
      *
-     * <p>Required, not cosmetic: the sensitivity is judged by moving the view,
+     * <p>Required, not cosmetic: both controls are judged against the live view,
      * and a paused single-player world stops redrawing it.
      */
     @Override
@@ -56,6 +61,8 @@ public class ToolscreenScreen extends Screen {
         int left = (this.width - widgetWidth) / 2;
         int y = firstRowY((int) Math.round(this.height * ToolscreenMobile.cropCentre()));
 
+        addButton(new StretchSlider(left, y, widgetWidth, 20));
+        y += ROW_HEIGHT;
         addButton(new SensitivitySlider(left, y, widgetWidth, 20));
         y += ROW_HEIGHT;
         addButton(new ButtonWidget(left, y, widgetWidth, 20, new LiteralText("Done"),
@@ -65,6 +72,15 @@ public class ToolscreenScreen extends Screen {
     /** Top of the control block, centred on the row the crop shows. */
     private static int firstRowY(int centre) {
         return centre - (ROWS * ROW_HEIGHT) / 2;
+    }
+
+    /**
+     * Slider position for a stretch value. Static because it is needed to build
+     * the slider's initial value, which is a {@code super(...)} argument - and
+     * an instance method cannot be called before the supertype constructor runs.
+     */
+    private static double stretchToSlider(double stretch) {
+        return Math.max(0.0, Math.min(1.0, (stretch - MIN_STRETCH) / (MAX_STRETCH - MIN_STRETCH)));
     }
 
     @Override
@@ -77,10 +93,9 @@ public class ToolscreenScreen extends Screen {
 
     @Override
     public void render(MatrixStack matrices, int mouseX, int mouseY, float delta) {
-        // No renderBackground: the view behind is what the sensitivity is being
-        // judged against, and dimming it would defeat the purpose.
-        int centre = (int) Math.round(this.height * ToolscreenMobile.cropCentre());
-        int top = firstRowY(centre);
+        // No renderBackground: the view behind is what both controls are judged
+        // against, and dimming it would defeat the purpose.
+        int top = firstRowY((int) Math.round(this.height * ToolscreenMobile.cropCentre()));
 
         drawCentredLine(matrices,
                 ToolscreenMobile.renderWidth() + "x" + ToolscreenMobile.renderHeight(), top - 22);
@@ -92,6 +107,40 @@ public class ToolscreenScreen extends Screen {
     private void drawCentredLine(MatrixStack matrices, String text, int y) {
         int x = (this.width - this.textRenderer.getWidth(text)) / 2;
         this.textRenderer.drawWithShadow(matrices, text, x, y, 0xFFFFFF);
+    }
+
+    /**
+     * The main screen's vertical scale.
+     *
+     * <p>Above 1 makes the view taller, which is the direction that undoes a
+     * horizontal stretch. Applied as it is dragged: it only changes a viewport,
+     * so unlike the render height there is nothing expensive to rebuild.
+     *
+     * <p>Cosmetic only. The ruler counts pixels sampled from the framebuffer,
+     * which this never touches, so no position of this slider can make a
+     * reading wrong.
+     */
+    private class StretchSlider extends SliderWidget {
+
+        StretchSlider(int x, int y, int width, int height) {
+            super(x, y, width, height, new LiteralText(""),
+                    stretchToSlider(ToolscreenMobile.mainStretch()));
+            updateMessage();
+        }
+
+        private double stretch() {
+            return MIN_STRETCH + this.value * (MAX_STRETCH - MIN_STRETCH);
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(new LiteralText(String.format("Main stretch  %.2fx", stretch())));
+        }
+
+        @Override
+        protected void applyValue() {
+            ToolscreenMobile.setMainStretch(stretch());
+        }
     }
 
     /**

@@ -41,7 +41,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * these numbers are still being fitted against the original screenshot by
      * screenshot; it stops once the shape settles.
      */
-    private static final int CONFIG_VERSION = 9;
+    private static final int CONFIG_VERSION = 11;
     static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
     /**
@@ -131,20 +131,31 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile int eyeZoomRegionWidth = 24;
     private static volatile int eyeZoomRegionHeight = 60;
 
-    // Separate horizontal and vertical magnification, as the original has:
-    // its strings carry clone_width and clone_height independently. The stretch
-    // runs along X - each game pixel is drawn wider than it is tall, which
-    // suits a ruler that counts horizontal offsets.
-    private static final int STRETCH_X = 64;
+    /**
+     * Screen pixels per framebuffer pixel across the clone panel.
+     *
+     * <p>Separate from the vertical figure, as the original has it - its strings
+     * carry clone_width and clone_height independently. The stretch runs along
+     * X: each framebuffer pixel is drawn far wider than it is tall, which is
+     * what makes a ruler counting horizontal offsets legible.
+     *
+     * <p>This is the real number now, not a factor with a multiplier applied
+     * somewhere else. It used to be 64 with a fixed 0.5 clone zoom behind it,
+     * which drew 32 - and a control reading 64 while drawing 32 is the kind of
+     * thing that reads plausibly and measures wrongly.
+     */
+    private static final int STRETCH_X = 32;
 
-    // Far lower than the horizontal figure, and far lower than it used to be.
-    // The panel is a fixed size now, so this decides how much of the frame fits
-    // inside it rather than how big the panel grows: at 17 an eye of ender was
-    // taller than the panel could show, and no amount of scrolling would have
-    // helped because the rows simply were not sampled. Four fits the whole of it
-    // with room either side, and the ruler counts horizontal offsets anyway, so
-    // vertical magnification buys nothing the measurement needs.
-    private static final int STRETCH_Y = 4;
+    /**
+     * Screen pixels per framebuffer pixel down the clone panel.
+     *
+     * <p>Far lower than the horizontal figure. The panel is a fixed size, so
+     * this decides how much of the frame fits inside it rather than how large
+     * the panel grows: high values left an eye of ender taller than the panel
+     * could show. The ruler counts horizontal offsets, so vertical
+     * magnification buys nothing the measurement needs - only context.
+     */
+    private static final int STRETCH_Y = 2;
 
     /**
      * The panel's size, as fractions of the screen, fixed regardless of zoom.
@@ -247,20 +258,23 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static final double MAIN_ZOOM = 8.0;
 
     /**
-     * Overall magnification of the clone panel, on top of the per-axis factors.
+     * Vertical scale of the game view on screen, correcting its aspect.
      *
-     * <p>Separate from those factors because they answer a different question.
-     * eyeZoomFactorX and Y set the panel's <em>shape</em> - how much wider than
-     * tall a framebuffer pixel is drawn, which is what makes the ruler legible
-     * along the axis it counts. This scales both together, so zooming the clone
-     * in or out does not disturb that shape. Without it, changing how much of
-     * the frame the panel shows meant moving two sliders and keeping their ratio
-     * by hand.
+     * <p>The view comes out stretched horizontally on this hardware - measured
+     * off a screenshot, an eye of ender's texels were 33.5 pixels wide against
+     * 22 tall. It should not be: the projection and the render target are built
+     * from the same numbers, and an automatic repair for them drifting apart is
+     * already in place. Since that did not settle it and three attempts to
+     * explain it from the symptom were wrong, this corrects the result directly.
      *
-     * <p>Because the panel is a fixed size, this decides how much fits inside
-     * it: lower shows more of the frame at a smaller scale, higher shows less.
+     * <p>Applied to the blit's height rather than its width, so the game window
+     * keeps its width and only what fills it changes shape. Purely cosmetic: the
+     * ruler counts pixels sampled from the framebuffer, which this never
+     * touches, so no value here can make a reading wrong - only ugly.
      */
-    private static final double CLONE_ZOOM = 0.5;
+    private static volatile double mainStretch = 1.0;
+
+
 
     /**
      * Mouse sensitivity while a measuring mode is active, in Minecraft's own
@@ -398,19 +412,24 @@ public final class ToolscreenMobile implements ClientModInitializer {
         }
     }
 
-    public static double cloneZoom() {
-        return CLONE_ZOOM;
-    }
 
 
     /** Horizontal magnification actually used: the axis factor times the zoom. */
     public static int effectiveZoomX() {
-        return Math.max(1, (int) Math.round(STRETCH_X * CLONE_ZOOM));
+        return STRETCH_X;
     }
 
     /** Vertical magnification actually used. */
     public static int effectiveZoomY() {
-        return Math.max(1, (int) Math.round(STRETCH_Y * CLONE_ZOOM));
+        return STRETCH_Y;
+    }
+
+    public static double mainStretch() {
+        return mainStretch;
+    }
+
+    public static void setMainStretch(double value) {
+        mainStretch = Math.max(0.25, Math.min(4.0, value));
     }
 
     public static double mainZoom() {
@@ -843,6 +862,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
                 String.valueOf(props.getProperty("crosshairVanilla")).trim());
         crosshairScale = clampDouble(props.getProperty("crosshairScale"), crosshairScale, 0.1, 8.0);
         measureSensitivity = clampDouble(props.getProperty("measureSensitivity"), measureSensitivity, 0.001, 1.0);
+        mainStretch = clampDouble(props.getProperty("mainStretch"), mainStretch, 0.25, 4.0);
         panelHeightFraction = clampDouble(props.getProperty("panelHeightFraction"), panelHeightFraction, 0.1, 1.0);
         panelAspect = clampDouble(props.getProperty("panelAspect"), panelAspect, 0.1, 4.0);
 
@@ -968,6 +988,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("crosshairVanilla", Boolean.toString(crosshairVanilla));
         props.setProperty("crosshairScale", Double.toString(crosshairScale));
         props.setProperty("measureSensitivity", Double.toString(measureSensitivity));
+        props.setProperty("mainStretch", Double.toString(mainStretch));
         props.setProperty("panelHeightFraction", Double.toString(panelHeightFraction));
         props.setProperty("panelAspect", Double.toString(panelAspect));
         props.setProperty("reportKey", KeyCodes.nameOf(reportKey, Integer.toString(reportKey)));
