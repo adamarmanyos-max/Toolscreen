@@ -22,6 +22,10 @@ on:
         description: "Optional regex to keep only matching signature lines"
         required: false
         type: string
+      flags:
+        description: "javap flags; '-c -p' adds bytecode, to see which calls a method makes"
+        required: false
+        type: string
 
 jobs:
   build:
@@ -62,6 +66,7 @@ jobs:
         env:
           CLASSES: ${{ inputs.classes }}
           FILTER: ${{ inputs.filter }}
+          FLAGS: ${{ inputs.flags }}
         run: |
           set -eu
           LIST="${CLASSES:-}"
@@ -77,7 +82,7 @@ jobs:
           for c in $LIST; do
             echo ""
             echo "================ $c ================"
-            javap -p -cp "$JAR" "$c" 2>&1 | grep -E "${FILTER:-.}" | head -250
+            javap ${FLAGS:--p} -cp "$JAR" "$c" 2>&1 | grep -E "${FILTER:-.}" | head -250
           done
 
       # Uploaded even on failure: a failed run still tells us which yarn names
