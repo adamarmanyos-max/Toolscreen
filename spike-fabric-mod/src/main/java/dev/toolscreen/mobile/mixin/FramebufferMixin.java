@@ -13,43 +13,75 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Centres the rendered strip on screen.
+ * Puts the rendered strip on screen: where {@code align} asks, and in Eye
+ * Measure as a 1:1 crop of a framebuffer far taller than the screen.
  *
- * <p>Minecraft finishes a frame by blitting its main render target to the
- * screen, setting up that blit with a {@code viewport(0, 0, width, height)}
- * call. GL's viewport origin is the <em>bottom-left</em> corner, so once
- * {@code WindowMixin} reports a width narrower than the real surface, the strip
- * is drawn hard against the left edge with the remainder left black.
+ * <h2>How the crop is made</h2>
  *
- * <p>Redirecting that call moves the strip to where {@code align} asks for, and
- * — since the framebuffer is now much taller than the screen — draws it at its
- * own size rather than squeezed into the display, so only the middle slice is
- * visible. See the redirect for why a crop rather than a fit.
+ * Minecraft finishes a frame with {@code drawInternal}, which sets an
+ * orthographic projection the size of the framebuffer, a viewport the same size,
+ * and draws one textured quad over it. Showing only a slice used to be done by
+ * leaving the quad alone and handing GL a viewport as tall as the framebuffer -
+ * sixteen thousand rows - positioned so its middle landed on the screen.
  *
- * <h2>Why this exact target</h2>
+ * <p>The driver clamped that viewport's height. The quad was squashed into the
+ * clamped height, which read as a horizontal stretch of about 1.52, and the row
+ * that landed at screen centre moved, which needed a crop of 0.327 to undo.
+ * Those two numbers are the same fault: 0.5 / 1.52 = 0.328. The stretch had been
+ * measured off a screenshot and the crop found by hand, independently.
  *
- * Verified by disassembling the remapped 1.16.1 jar rather than assumed, after
- * a first attempt crashed on load with "Scanned 0 target(s)":
+ * <p>Now every viewport is screen-sized. The slice is chosen with the
+ * projection instead: its vertical range is set to just the rows that should
+ * show, so the rest of the quad falls outside clip space and is cut there, by
+ * arithmetic rather than by a limit. There is nothing oversized left to clamp.
  *
- * <ul>
- *   <li>The call lives in {@code drawInternal}, not {@code draw} — {@code draw}
- *       only defers to a render-call lambda.</li>
- *   <li>It is {@code GlStateManager.viewport}, not {@code RenderSystem.viewport}.</li>
- *   <li>{@code Framebuffer.bind} calls {@code viewport} too, and that one must
- *       <em>not</em> be touched: it sets up rendering <em>into</em> the
- *       framebuffer at texture size. Targeting {@code drawInternal} specifically
- *       leaves it alone.</li>
- * </ul>
+ * <h2>Why these exact targets</h2>
+ *
+ * Verified from the remapped 1.16.1 jar's bytecode: {@code drawInternal} makes
+ * one {@code GlStateManager.ortho(DDDDDD)V} call and then one
+ * {@code GlStateManager.viewport(IIII)V}. {@code Framebuffer.bind} also calls
+ * {@code viewport} and must not be touched - it sets up rendering into the
+ * framebuffer - which targeting {@code drawInternal} leaves alone.
  */
 @Mixin(Framebuffer.class)
 public abstract class FramebufferMixin {
 
     /**
-     * {@code require = 0} deliberately: centring is cosmetic, and a mismatched
-     * target here previously crashed the game on load. Mixin aborts startup
-     * when a required injector finds no target, which is the right behaviour
-     * for the core size override but far too harsh for positioning. If this
-     * ever stops matching, the game launches and renders left-aligned instead.
+     * The projection for the final blit. In Eye Measure its vertical range is
+     * narrowed to the rows that should be visible; everything else passes
+     * through.
+     *
+     * <p>In {@code drawInternal}'s projection a vertex at y = height is the
+     * framebuffer's bottom row and y = 0 its top, so framebuffer row r (counted
+     * from the bottom) sits at y = height - r. Setting the bottom and top of the
+     * projection to the y of the lowest and highest visible rows maps exactly
+     * those rows onto the viewport, one to one.
+     */
+    @Redirect(
+            method = "drawInternal(IIZ)V",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lcom/mojang/blaze3d/platform/GlStateManager;ortho(DDDDDD)V"),
+            require = 0)
+    private void toolscreen$cropBlitProjection(double left, double right, double bottom, double top,
+                                              double near, double far) {
+        int height = (int) Math.round(bottom);
+        if (!toolscreen$croppingMainPass((int) Math.round(right), height)) {
+            GlStateManager.ortho(left, right, bottom, top, near, far);
+            return;
+        }
+        int visible = toolscreen$visibleRows(height);
+        int firstRow = toolscreen$firstVisibleRow(height, visible);
+        GlStateManager.ortho(left, right, height - firstRow, height - firstRow - visible, near, far);
+    }
+
+    /**
+     * The viewport for the final blit: offset for {@code align}, and in Eye
+     * Measure screen-sized and scaled across by the main-screen stretch.
+     *
+     * <p>{@code require = 0}: positioning is cosmetic, and a mismatched target
+     * here once crashed the game on load. If this ever stops matching, the game
+     * launches and draws left-aligned instead.
      */
     @Redirect(
             method = "drawInternal(IIZ)V",
@@ -59,29 +91,9 @@ public abstract class FramebufferMixin {
             require = 0)
     private void toolscreen$offsetBlitViewport(int x, int y, int width, int height) {
         ToolscreenMobile.noteCenteringActive();
-
-        // A 1:1 centre crop, not a fit.
-        //
-        // The framebuffer is 16384 rows tall and the screen is under two
-        // thousand. Scaling that down to fit would shrink everything on it by
-        // the same factor, throwing away every pixel the extra render height was
-        // bought for - and the view then looks about eight times smaller than
-        // the original's, which is exactly what a screenshot showed. So the
-        // viewport is the framebuffer's own size, positioned so its centre lands
-        // where the strip should be; GL clips the overhang. That is what
-        // Toolscreen gets on Windows by making the window taller than the
-        // monitor.
-        //
-        // The visible strip is therefore width x screenHeight, which is what the
-        // panel geometry below is measured against.
-        int screenH = ToolscreenMobile.nativeHeight();
         int stripX = x + ToolscreenMobile.offsetX();
 
-        // Only Eye Measure renders taller than the screen, so only Eye Measure
-        // has anything to crop. In every other mode the framebuffer already fits
-        // the display and this would just offset a picture that was correct -
-        // which is why the crop setting has no business applying there.
-        if (!ToolscreenMobile.eyeZoomActive()) {
+        if (!toolscreen$croppingMainPass(width, height)) {
             lastBlitX = stripX;
             lastBlitY = y + ToolscreenMobile.offsetY();
             lastBlitW = width;
@@ -90,30 +102,59 @@ public abstract class FramebufferMixin {
             return;
         }
 
-        // The main-screen stretch scales the drawn width. The window is
-        // re-centred on the same point, so it widens or narrows symmetrically
-        // and the crosshair stays where it was; the recorded blit rectangle
-        // follows, so the background, the panel and its overlap guard all see
-        // the window at the width it is actually drawn.
+        int screenH = ToolscreenMobile.nativeHeight();
+        int visible = toolscreen$visibleRows(height);
+
+        // The stretch scales the drawn width about the strip's own centre, so
+        // the crosshair stays where it was; the recorded rectangle follows, so
+        // the background and the clone panel's overlap guard see the width the
+        // window is actually drawn at.
         int drawnW = (int) Math.round(width * ToolscreenMobile.mainStretch());
         if (drawnW < 2) drawnW = width;
         int drawnX = stripX + (width - drawnW) / 2;
+        int drawnY = Math.max(0, (screenH - visible) / 2);
 
         lastBlitX = drawnX;
-        lastBlitY = 0;
+        lastBlitY = drawnY;
         lastBlitW = drawnW;
-        lastBlitH = Math.min(height, screenH > 0 ? screenH : height);
+        lastBlitH = visible;
 
-        // Which framebuffer row lands at the screen's centre. Centred should
-        // mean 0.5, but on this hardware it does not land there, so the value is
-        // the one found on the device - see ToolscreenMobile.CROP_CENTRE.
-        int vy = y;
-        if (screenH > 0) {
-            int anchor = (int) Math.round(height * ToolscreenMobile.cropCentre());
-            vy = screenH / 2 - anchor;
-        }
-        ToolscreenMobile.noteCrop(screenH, height, vy);
-        GlStateManager.viewport(drawnX, vy, drawnW, height);
+        ToolscreenMobile.noteCrop(screenH, height,
+                toolscreen$firstVisibleRow(height, visible) + visible / 2);
+        GlStateManager.viewport(drawnX, drawnY, drawnW, visible);
+    }
+
+    /**
+     * True for the main pass in Eye Measure, the only blit that is cropped.
+     *
+     * <p>Picked out by size: shader effects blit through this same method with
+     * their own framebuffers and must be left alone.
+     */
+    @Unique
+    private static boolean toolscreen$croppingMainPass(int width, int height) {
+        if (!ToolscreenMobile.isOverrideActive() || !ToolscreenMobile.eyeZoomActive()) return false;
+        if (ToolscreenMobile.nativeHeight() < 2) return false;
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.getWindow() == null) return false;
+        return width == client.getWindow().getFramebufferWidth()
+                && height == client.getWindow().getFramebufferHeight();
+    }
+
+    /** Framebuffer rows that fit on screen: all of them, or one per screen row. */
+    @Unique
+    private static int toolscreen$visibleRows(int height) {
+        return Math.max(1, Math.min(height, ToolscreenMobile.nativeHeight()));
+    }
+
+    /**
+     * Lowest visible framebuffer row, counted from the bottom: the crop centre
+     * row minus half a screen, kept inside the framebuffer.
+     */
+    @Unique
+    private static int toolscreen$firstVisibleRow(int height, int visible) {
+        int centreRow = (int) Math.round(height * ToolscreenMobile.cropCentre());
+        int first = centreRow - visible / 2;
+        return Math.max(0, Math.min(height - visible, first));
     }
 
     /**

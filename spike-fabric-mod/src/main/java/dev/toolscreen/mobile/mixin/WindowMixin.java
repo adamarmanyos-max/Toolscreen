@@ -56,7 +56,7 @@ public abstract class WindowMixin {
         ToolscreenMobile.recordNativeSize(this.framebufferWidth, this.framebufferHeight);
         if (!ToolscreenMobile.isOverrideActive()) return;
         Mode mode = ToolscreenMobile.activeMode();
-        int width = GlLimits.clampTexture(mode.resolveWidth(ToolscreenMobile.nativeWidth()));
+        int width = GlLimits.clampTexture(ToolscreenMobile.resolveRenderWidth(mode, ToolscreenMobile.nativeWidth()));
         int height = GlLimits.clampTexture(
                 ToolscreenMobile.resolveRenderHeight(mode, ToolscreenMobile.nativeHeight()));
         ToolscreenMobile.recordReportedSize(width, height);
@@ -89,7 +89,7 @@ public abstract class WindowMixin {
     @Inject(method = "getScaledWidth", at = @At("HEAD"), cancellable = true)
     private void toolscreen$overrideScaledWidth(CallbackInfoReturnable<Integer> cir) {
         if (!ToolscreenMobile.isOverrideActive() || this.scaleFactor <= 0) return;
-        int width = GlLimits.clampTexture(ToolscreenMobile.activeMode().resolveWidth(ToolscreenMobile.nativeWidth()));
+        int width = GlLimits.clampTexture(ToolscreenMobile.resolveRenderWidth(ToolscreenMobile.activeMode(), ToolscreenMobile.nativeWidth()));
         cir.setReturnValue((int) Math.ceil(width / this.scaleFactor));
     }
 

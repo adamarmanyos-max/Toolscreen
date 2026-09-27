@@ -52,7 +52,6 @@ public abstract class MinecraftClientMixin {
             return;
         }
 
-        ToolscreenMobile.syncSensitivity(client);
         toolscreen$healSizeDrift(client);
 
         boolean down = InputUtil.isKeyPressed(client.getWindow().getHandle(), ToolscreenMobile.toggleKey());

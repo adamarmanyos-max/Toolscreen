@@ -9,37 +9,36 @@ import net.minecraft.text.LiteralText;
 /**
  * The settings menu, opened with comma.
  *
- * <p>Two controls. The crop, the main zoom and the clone panel's stretch are
- * constants - each has one correct value, found on the device, and an
- * adjustable one only invites being moved to something that reads plausibly
- * and measures wrongly. What is left is the main screen's stretch, which
- * corrects a fault whose cause is still unknown, and the aim sensitivity, which
- * is a matter of preference.
+ * <p>The clone panel's stretch is a constant; everything that shapes the main
+ * screen in Eye Measure is here: its zoom, crop, width and horizontal stretch,
+ * plus the aim speed used while measuring.
  *
  * <h2>Why it is positioned the way it is</h2>
  *
  * The menu lives inside Minecraft's framebuffer, which in this mode is a narrow
- * strip thousands of rows tall, most of it off-screen. Laid out the usual way -
- * centred on {@code height / 2} - it would sit at the framebuffer's middle,
- * which is not the middle of the display while the crop is offset, and the crop
- * always is. So it centres on the row the crop actually shows.
+ * strip thousands of rows tall with only a slice on screen. GUI coordinates run
+ * top-down while the crop is counted from the bottom, so the row the crop puts
+ * at screen centre is at {@code (1 - crop) * height} here - and the menu centres
+ * on that, following it as the crop moves, so it can never be adjusted out of
+ * reach.
  */
 public class ToolscreenScreen extends Screen {
 
-    /**
-     * Top of the sensitivity slider. 0.5 is 100% on Minecraft's own scale, so
-     * the whole useful range is reachable and nothing is clamped by this end.
-     */
-    private static final double MAX_SENSITIVITY = 0.5;
+    private static final double MAX_MAIN_ZOOM = 16.0;
 
-    /** Main-screen stretch range. 1.0 is uncorrected; the measured fault wants ~0.66. */
+    private static final double MIN_WIDTH = 0.02;
+    private static final double MAX_WIDTH = 0.40;
+
     private static final double MIN_STRETCH = 0.25;
     private static final double MAX_STRETCH = 2.0;
 
-    /** Main zoom range. 1.0 is vanilla; the GPU's limits cap the top further. */
-    private static final double MAX_MAIN_ZOOM = 16.0;
+    private static final double MIN_AIM = 0.01;
 
-    private static final int ROWS = 4;
+    /** Crop nudges: one screen height is about 12% of the render at 8x zoom. */
+    private static final double FINE_STEP = 0.001;
+    private static final double COARSE_STEP = 0.01;
+
+    private static final int ROWS = 7;
     private static final int ROW_HEIGHT = 22;
     private static final int MAX_WIDGET_WIDTH = 200;
 
@@ -50,7 +49,7 @@ public class ToolscreenScreen extends Screen {
     /**
      * The world keeps rendering and ticking behind this.
      *
-     * <p>Required, not cosmetic: both controls are judged against the live view,
+     * <p>Required, not cosmetic: every control is judged against the live view,
      * and a paused single-player world stops redrawing it.
      */
     @Override
@@ -62,30 +61,58 @@ public class ToolscreenScreen extends Screen {
     protected void init() {
         int widgetWidth = Math.min(MAX_WIDGET_WIDTH, Math.max(60, this.width - 12));
         int left = (this.width - widgetWidth) / 2;
-        int y = firstRowY((int) Math.round(this.height * ToolscreenMobile.cropCentre()));
+        int y = firstRowY();
 
         addButton(new MainZoomSlider(left, y, widgetWidth, 20));
         y += ROW_HEIGHT;
+
+        addButton(new CropSlider(left, y, widgetWidth, 20));
+        y += ROW_HEIGHT;
+        int quarter = widgetWidth / 4;
+        addButton(new ButtonWidget(left, y, quarter - 2, 20, new LiteralText("<<"),
+                b -> nudgeCrop(-COARSE_STEP)));
+        addButton(new ButtonWidget(left + quarter, y, quarter - 2, 20, new LiteralText("<"),
+                b -> nudgeCrop(-FINE_STEP)));
+        addButton(new ButtonWidget(left + 2 * quarter, y, quarter - 2, 20, new LiteralText(">"),
+                b -> nudgeCrop(FINE_STEP)));
+        addButton(new ButtonWidget(left + 3 * quarter, y, quarter - 2, 20, new LiteralText(">>"),
+                b -> nudgeCrop(COARSE_STEP)));
+        y += ROW_HEIGHT;
+
+        addButton(new WidthSlider(left, y, widgetWidth, 20));
+        y += ROW_HEIGHT;
         addButton(new StretchSlider(left, y, widgetWidth, 20));
         y += ROW_HEIGHT;
-        addButton(new SensitivitySlider(left, y, widgetWidth, 20));
+        addButton(new AimSlider(left, y, widgetWidth, 20));
         y += ROW_HEIGHT;
+
         addButton(new ButtonWidget(left, y, widgetWidth, 20, new LiteralText("Done"),
-                button -> onClose()));
+                b -> onClose()));
     }
 
-    /** Top of the control block, centred on the row the crop shows. */
-    private static int firstRowY(int centre) {
+    /** Top of the control block, centred on the row the crop shows mid-screen. */
+    private int firstRowY() {
+        int centre = (int) Math.round(this.height * (1.0 - ToolscreenMobile.cropCentre()));
         return centre - (ROWS * ROW_HEIGHT) / 2;
     }
 
-    /**
-     * Slider position for a stretch value. Static because it is needed to build
-     * the slider's initial value, which is a {@code super(...)} argument - and
-     * an instance method cannot be called before the supertype constructor runs.
-     */
-    private static double stretchToSlider(double stretch) {
-        return Math.max(0.0, Math.min(1.0, (stretch - MIN_STRETCH) / (MAX_STRETCH - MIN_STRETCH)));
+    private void nudgeCrop(double delta) {
+        ToolscreenMobile.setCropCentre(ToolscreenMobile.cropCentre() + delta);
+        rebuild();
+    }
+
+    /** Re-runs {@link #init()} so the rows follow the crop they just moved. */
+    private void rebuild() {
+        if (this.client != null) {
+            this.init(this.client, this.width, this.height);
+        }
+    }
+
+    /** Rebuilds the render target after a change to its size. */
+    private void resizeRenderTarget() {
+        if (this.client != null) {
+            this.client.onResolutionChanged();
+        }
     }
 
     @Override
@@ -98,14 +125,12 @@ public class ToolscreenScreen extends Screen {
 
     @Override
     public void render(MatrixStack matrices, int mouseX, int mouseY, float delta) {
-        // No renderBackground: the view behind is what both controls are judged
+        // No renderBackground: the view behind is what every control is judged
         // against, and dimming it would defeat the purpose.
-        int top = firstRowY((int) Math.round(this.height * ToolscreenMobile.cropCentre()));
-
+        int top = firstRowY();
         drawCentredLine(matrices,
                 ToolscreenMobile.renderWidth() + "x" + ToolscreenMobile.renderHeight(), top - 22);
         drawCentredLine(matrices, "Ninjabrain: " + ToolscreenMobile.renderHeight(), top - 11);
-
         super.render(matrices, mouseX, mouseY, delta);
     }
 
@@ -114,23 +139,23 @@ public class ToolscreenScreen extends Screen {
         this.textRenderer.drawWithShadow(matrices, text, x, y, 0xFFFFFF);
     }
 
+    private static double toSlider(double value, double min, double max) {
+        return Math.max(0.0, Math.min(1.0, (value - min) / (max - min)));
+    }
+
     /**
      * How much taller than the screen the game renders - the main screen's zoom.
      *
-     * <p>Applied on release rather than while dragging: each change reallocates
-     * a framebuffer that can be tens of megabytes, and doing that every frame of
-     * a drag would stall the game rather than preview anything.
-     *
-     * <p>Unlike the stretch below, this is not cosmetic. It sets the render
-     * height, which is the figure Ninjabrain Bot needs - so the label shows the
-     * resulting height, and that number has to be re-entered there whenever
-     * this moves.
+     * <p>Applied on release: each change reallocates a framebuffer of tens of
+     * megabytes. Not cosmetic - it sets the render height, the figure Ninjabrain
+     * Bot needs, so the label shows it and it has to be re-entered there
+     * whenever this moves.
      */
     private class MainZoomSlider extends SliderWidget {
 
         MainZoomSlider(int x, int y, int width, int height) {
             super(x, y, width, height, new LiteralText(""),
-                    (ToolscreenMobile.mainZoom() - 1.0) / (MAX_MAIN_ZOOM - 1.0));
+                    toSlider(ToolscreenMobile.mainZoom(), 1.0, MAX_MAIN_ZOOM));
             updateMessage();
         }
 
@@ -152,31 +177,80 @@ public class ToolscreenScreen extends Screen {
         @Override
         public void onRelease(double mouseX, double mouseY) {
             super.onRelease(mouseX, mouseY);
-            if (client != null) {
-                // Rebuilds the render target at the new height; nothing re-reads
-                // the reported size until a resize happens.
-                client.onResolutionChanged();
-            }
+            resizeRenderTarget();
+            updateMessage();
+        }
+    }
+
+    /** Which framebuffer row lands at the centre of the screen. 50% is centred. */
+    private class CropSlider extends SliderWidget {
+
+        CropSlider(int x, int y, int width, int height) {
+            super(x, y, width, height, new LiteralText(""), ToolscreenMobile.cropCentre());
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(new LiteralText(String.format("Crop  %.1f%%", this.value * 100.0)));
+        }
+
+        @Override
+        protected void applyValue() {
+            ToolscreenMobile.setCropCentre(this.value);
+        }
+
+        @Override
+        public void onRelease(double mouseX, double mouseY) {
+            super.onRelease(mouseX, mouseY);
+            rebuild();
+        }
+    }
+
+    /**
+     * Width of the game window in Eye Measure, as a share of the screen. Also the
+     * framebuffer width, so applied on release like the zoom.
+     */
+    private class WidthSlider extends SliderWidget {
+
+        WidthSlider(int x, int y, int width, int height) {
+            super(x, y, width, height, new LiteralText(""),
+                    toSlider(ToolscreenMobile.eyeWidth(), MIN_WIDTH, MAX_WIDTH));
+            updateMessage();
+        }
+
+        private double share() {
+            return MIN_WIDTH + this.value * (MAX_WIDTH - MIN_WIDTH);
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(new LiteralText(String.format("Width  %.1f%%  (%d px)",
+                    share() * 100.0, ToolscreenMobile.renderWidth())));
+        }
+
+        @Override
+        protected void applyValue() {
+            ToolscreenMobile.setEyeWidth(share());
+        }
+
+        @Override
+        public void onRelease(double mouseX, double mouseY) {
+            super.onRelease(mouseX, mouseY);
+            resizeRenderTarget();
             updateMessage();
         }
     }
 
     /**
-     * The main screen's horizontal scale.
-     *
-     * <p>Below 1 narrows the view, which is the direction that undoes a
-     * horizontal stretch. Applied as it is dragged: it only changes a viewport,
-     * so unlike the render height there is nothing expensive to rebuild.
-     *
-     * <p>Cosmetic only. The ruler counts pixels sampled from the framebuffer,
-     * which this never touches, so no position of this slider can make a
-     * reading wrong.
+     * Horizontal scale of the drawn view. Cosmetic: the ruler reads the
+     * framebuffer, which this never touches.
      */
     private class StretchSlider extends SliderWidget {
 
         StretchSlider(int x, int y, int width, int height) {
             super(x, y, width, height, new LiteralText(""),
-                    stretchToSlider(ToolscreenMobile.mainStretch()));
+                    toSlider(ToolscreenMobile.mainStretch(), MIN_STRETCH, MAX_STRETCH));
             updateMessage();
         }
 
@@ -196,35 +270,29 @@ public class ToolscreenScreen extends Screen {
     }
 
     /**
-     * Mouse sensitivity used while measuring.
-     *
-     * <p>Shows both the percentage and the raw value: the percentage matches
-     * what Minecraft's own options screen would say, and the raw number is what
-     * actually gets written. If the view stops getting slower before the slider
-     * reaches its bottom, those two together say whether this control is the
-     * thing clamping or something downstream of it is.
+     * Look speed while measuring, as a share of the player's normal speed.
+     * Linear, with no floor - see {@code MouseMixin} for why that matters.
      */
-    private class SensitivitySlider extends SliderWidget {
+    private class AimSlider extends SliderWidget {
 
-        SensitivitySlider(int x, int y, int width, int height) {
+        AimSlider(int x, int y, int width, int height) {
             super(x, y, width, height, new LiteralText(""),
-                    ToolscreenMobile.measureSensitivity() / MAX_SENSITIVITY);
+                    toSlider(ToolscreenMobile.aimSpeed(), MIN_AIM, 1.0));
             updateMessage();
         }
 
-        private double sensitivity() {
-            return Math.max(0.0, this.value * MAX_SENSITIVITY);
+        private double speed() {
+            return MIN_AIM + this.value * (1.0 - MIN_AIM);
         }
 
         @Override
         protected void updateMessage() {
-            setMessage(new LiteralText(String.format("Aim sens  %.1f%%  (%.3f)",
-                    sensitivity() * 200.0, sensitivity())));
+            setMessage(new LiteralText(String.format("Aim speed  %.0f%% of normal", speed() * 100.0)));
         }
 
         @Override
         protected void applyValue() {
-            ToolscreenMobile.setMeasureSensitivity(sensitivity());
+            ToolscreenMobile.setAimSpeed(speed());
         }
     }
 }

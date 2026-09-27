@@ -41,7 +41,7 @@ public final class ToolscreenMobile implements ClientModInitializer {
      * these numbers are still being fitted against the original screenshot by
      * screenshot; it stops once the shape settles.
      */
-    private static final int CONFIG_VERSION = 12;
+    private static final int CONFIG_VERSION = 13;
     static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
     /**
@@ -225,17 +225,24 @@ public final class ToolscreenMobile implements ClientModInitializer {
     private static volatile double crosshairScale = 1.0;
 
     /**
-     * Which row of the framebuffer lands at the centre of the screen.
+     * Which framebuffer row lands at the centre of the screen, as a fraction of
+     * the render height counted from the bottom.
      *
-     * <p>Fixed, and deliberately not 0.5. The crop should be centred and the
-     * arithmetic asks for centred, but on this hardware it lands elsewhere -
-     * three attempts to work out why from the symptom were all wrong, so the
-     * value was found by moving it until the view sat right. 0.327 is that
-     * value. It is a constant rather than a setting because it is a property of
-     * the fault, not a preference: an adjustable one only invites it being set
-     * to something that reads plausibly and measures wrongly.
+     * <p>0.5 is the crosshair, and with the blit now built from screen-sized
+     * viewports it should also be where things line up. It used to need 0.327,
+     * found by hand; that turned out to be the driver clamping an oversized
+     * viewport, and 0.327 is almost exactly 0.5 divided by the 1.52 stretch the
+     * same clamp produced. Adjustable still, as a fallback while that is
+     * confirmed on the device.
      */
-    private static final double CROP_CENTRE = 0.327;
+    private static volatile double cropCentre = 0.5;
+
+    /**
+     * Width of the game window in Eye Measure, as a fraction of the screen.
+     * It is also the framebuffer width, since the blit is 1:1 horizontally
+     * before the stretch correction.
+     */
+    private static volatile double eyeWidth = 0.11;
 
     /**
      * How much taller than the screen the game renders, in Eye Measure.
@@ -278,20 +285,18 @@ public final class ToolscreenMobile implements ClientModInitializer {
 
 
     /**
-     * Mouse sensitivity while a measuring mode is active, in Minecraft's own
-     * units, where 1.0 is the slider's 200%.
+     * Look speed while measuring, as a fraction of the player's normal speed.
      *
-     * <p>Aiming at eight times magnification needs a fraction of the
-     * sensitivity that walking around does - a flick that moves the crosshair a
-     * few pixels normally now sweeps it past the whole eye. Applied on entering
-     * the mode and put back on leaving, so the setting that suits the rest of
-     * the run is not the one being used to measure with.
+     * <p>Applied to the look movement itself rather than through Minecraft's
+     * sensitivity option. That option goes through a cubic curve with a floor:
+     * from a normal setting of 30%, turning it all the way to 0% only slows the
+     * view to about a third - which is why the old slider seemed to do
+     * nothing. Scaling the movement directly has no floor and is linear, so
+     * 0.25 is exactly a quarter of the normal speed. It also never writes to
+     * options.txt, so nothing can leak into normal play.
      */
-    private static volatile double measureSensitivity = 0.05;
-
-    /** The player's own sensitivity, held while ours is in force. */
-    private static volatile double savedSensitivity;
-    private static volatile boolean sensitivityApplied;
+    private static volatile double aimSpeed = 0.25;
+    private static volatile boolean aimReported;
 
     /** Where the rendered area sits within the real screen. */
     public enum Align { LEFT, CENTER, RIGHT }
@@ -375,42 +380,26 @@ public final class ToolscreenMobile implements ClientModInitializer {
         return panelAspect;
     }
 
-    public static double measureSensitivity() {
-        return measureSensitivity;
+    public static double aimSpeed() {
+        return aimSpeed;
     }
 
-    public static void setMeasureSensitivity(double value) {
-        // No lower floor: Minecraft's own look speed has one built in, so a
-        // floor here would only stack a second, invisible one on top.
-        measureSensitivity = Math.max(0.0, Math.min(1.0, value));
+    public static void setAimSpeed(double value) {
+        aimSpeed = Math.max(0.01, Math.min(1.0, value));
     }
 
     /**
-     * Puts our sensitivity in force while measuring, and the player's back
-     * afterwards.
-     *
-     * <p>Driven from the client tick rather than from the mode toggle, so it
-     * also follows a change made in the menu, and so leaving the world restores
-     * the player's own value - which matters because that is roughly when
-     * Minecraft writes options.txt, and a value saved there would otherwise
-     * outlive the session.
+     * The factor to apply to look movement right now: the aim speed while a
+     * measuring mode is in force in a world, 1 otherwise.
      */
-    public static void syncSensitivity(MinecraftClient client) {
-        if (client == null || client.options == null) return;
-        boolean measuring = client.world != null && isOverrideActive() && eyeZoomActive();
-
-        if (measuring) {
-            if (!sensitivityApplied) {
-                savedSensitivity = client.options.mouseSensitivity;
-                sensitivityApplied = true;
-                LOGGER.info("[{}] sensitivity {} -> {} for measuring",
-                        MOD_ID, savedSensitivity, measureSensitivity);
-            }
-            client.options.mouseSensitivity = measureSensitivity;
-        } else if (sensitivityApplied) {
-            client.options.mouseSensitivity = savedSensitivity;
-            sensitivityApplied = false;
+    public static double lookScale(MinecraftClient client) {
+        if (client == null || client.world == null) return 1.0;
+        if (!isOverrideActive() || !eyeZoomActive()) return 1.0;
+        if (!aimReported) {
+            aimReported = true;
+            LOGGER.info("[{}] aim speed {} applied to look movement", MOD_ID, aimSpeed);
         }
+        return aimSpeed;
     }
 
 
@@ -458,21 +447,43 @@ public final class ToolscreenMobile implements ClientModInitializer {
     }
 
     public static double cropCentre() {
-        return CROP_CENTRE;
+        return cropCentre;
+    }
+
+    public static void setCropCentre(double value) {
+        cropCentre = Math.max(0.0, Math.min(1.0, value));
+    }
+
+    public static double eyeWidth() {
+        return eyeWidth;
+    }
+
+    public static void setEyeWidth(double value) {
+        eyeWidth = Math.max(0.02, Math.min(0.9, value));
+    }
+
+    /**
+     * The framebuffer width for this mode: the configured Eye Measure width
+     * when measuring, the mode's own width otherwise.
+     */
+    public static int resolveRenderWidth(Mode mode, int nativeWidth) {
+        if (eyeZoomActive()) return Mode.resolve(nativeWidth, eyeWidth);
+        return mode.resolveWidth(nativeWidth);
     }
 
     /**
      * Logged once: the crop actually asked for.
      *
-     * <p>The arithmetic here is simple enough to be obviously right, and was,
-     * while the result on screen was still wrong - so the numbers handed to GL
-     * go on the record next to the limits above.
+     * <p>Worth having on the record: the crop was once simple enough to be
+     * obviously right while the screen disagreed, because the driver clamped a
+     * viewport. The viewports are screen-sized now, so this line and the
+     * picture should agree.
      */
-    public static void noteCrop(int screenHeight, int renderHeight, int viewportY) {
+    public static void noteCrop(int screenHeight, int renderHeight, int centreRow) {
         if (cropReported) return;
         cropReported = true;
-        LOGGER.info("[{}] crop: screen height {}, render height {}, viewport y {}",
-                MOD_ID, screenHeight, renderHeight, viewportY);
+        LOGGER.info("[{}] crop: screen height {}, render height {}, row {} at screen centre",
+                MOD_ID, screenHeight, renderHeight, centreRow);
     }
 
     public static int crosshairGap() {
@@ -866,7 +877,9 @@ public final class ToolscreenMobile implements ClientModInitializer {
         crosshairVanilla = !"false".equalsIgnoreCase(
                 String.valueOf(props.getProperty("crosshairVanilla")).trim());
         crosshairScale = clampDouble(props.getProperty("crosshairScale"), crosshairScale, 0.1, 8.0);
-        measureSensitivity = clampDouble(props.getProperty("measureSensitivity"), measureSensitivity, 0.001, 1.0);
+        aimSpeed = clampDouble(props.getProperty("aimSpeed"), aimSpeed, 0.01, 1.0);
+        cropCentre = clampDouble(props.getProperty("cropCentre"), cropCentre, 0.0, 1.0);
+        eyeWidth = clampDouble(props.getProperty("eyeWidth"), eyeWidth, 0.02, 0.9);
         mainStretch = clampDouble(props.getProperty("mainStretch"), mainStretch, 0.25, 4.0);
         mainZoom = clampDouble(props.getProperty("mainZoom"), mainZoom, 1.0, 16.0);
         panelHeightFraction = clampDouble(props.getProperty("panelHeightFraction"), panelHeightFraction, 0.1, 1.0);
@@ -993,7 +1006,9 @@ public final class ToolscreenMobile implements ClientModInitializer {
         props.setProperty("fovScale", Double.toString(fovScale));
         props.setProperty("crosshairVanilla", Boolean.toString(crosshairVanilla));
         props.setProperty("crosshairScale", Double.toString(crosshairScale));
-        props.setProperty("measureSensitivity", Double.toString(measureSensitivity));
+        props.setProperty("aimSpeed", Double.toString(aimSpeed));
+        props.setProperty("cropCentre", Double.toString(cropCentre));
+        props.setProperty("eyeWidth", Double.toString(eyeWidth));
         props.setProperty("mainStretch", Double.toString(mainStretch));
         props.setProperty("mainZoom", Double.toString(mainZoom));
         props.setProperty("panelHeightFraction", Double.toString(panelHeightFraction));
