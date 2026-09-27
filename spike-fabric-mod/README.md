@@ -90,6 +90,38 @@ It is editable **on-device**, deliberately: rebuilding needs a computer, and
 tuning mode dimensions without a rebuild is the difference between a usable
 spike and a useless one.
 
+## Working with Stronghold Finder
+
+[Stronghold Finder](https://github.com/adamarmanyos-max/StrongholdCalculator)
+is the "reimplement the Ninjabrain maths natively" item from `DESIGN.md`: an
+in-game stronghold calculator. Installed together, they give one-eye (boat eye)
+measuring on iOS:
+
+- **`ToolscreenApi`** (`dev.toolscreen.mobile.api`) is a small API for other
+  mods. It only uses JDK and Minecraft types, so Stronghold Finder calls it by
+  reflection and neither mod needs the other to build or run.
+- **Side panel.** In any non-native mode, other mods can draw in the letterbox
+  beside the strip, on the side the zoom panel isn't using. Stronghold Finder
+  puts its results there, because its normal HUD position is in the part of
+  the tall render that gets cropped away.
+- **Eye Measure from another key.** Stronghold Finder's `↑` switches Eye
+  Measure on and off through the API.
+- **One angle per pixel.** Both mods work out degrees per pixel from the
+  framebuffer height and the FOV actually rendered (Eye Measure halves it:
+  `fovScale`). So one ruler cell and one of Stronghold Finder's `←`/`→`
+  adjustments are the same angle.
+
+The measurement report moved from `M` to `;` (`reportKey`), since Stronghold
+Finder uses `M`. Config version 14 replaces older files with the defaults, as
+before.
+
+### Ninjabrain Bot
+
+Ninjabrain Bot's pixel hotkeys assume a 30° FOV. Eye Measure narrows the FOV,
+so the render height is the wrong number to type into Ninjabrain's
+tall-resolution box. The measurement report (`;`) prints the number to use
+instead, along with the angle one ruler cell covers.
+
 ## Building
 
 Pre-built jars come from CI — every push builds one and attaches it to the run,
