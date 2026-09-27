@@ -56,9 +56,9 @@ public abstract class MinecraftClientMixin {
 
         boolean down = InputUtil.isKeyPressed(client.getWindow().getHandle(), ToolscreenMobile.toggleKey());
 
-        // Edge-triggered: cycle once per press, not once per tick held.
+        // Edge-triggered: one step per press, not one per tick held.
         if (down && !this.toolscreen$toggleWasDown) {
-            ToolscreenMobile.cycleMode();
+            ToolscreenMobile.pressToggle(System.currentTimeMillis());
             // Forces Minecraft to resize its render target against the new
             // reported dimensions; without this the change lands only on the
             // next genuine resize.

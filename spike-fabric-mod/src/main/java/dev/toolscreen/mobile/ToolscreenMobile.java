@@ -65,13 +65,13 @@ public final class ToolscreenMobile implements ClientModInitializer {
      */
     private static final List<Mode> DEFAULT_MODES = List.of(
             new Mode("Native", 1.00, 1.00),
-            new Mode("Thin", 0.14, 1.00),
             // Width as before; height far beyond the screen on purpose. That
             // height is the zoom: angle per pixel is the vertical field of view
             // over the render height, so 16384 rows magnify the view about eight
             // times without touching the camera - which the earlier fovScale did,
             // and which silently falsified every reading it produced.
             new Mode("Eye Measure", 0.11, 1.00),
+            new Mode("Thin", 0.14, 1.00),
             new Mode("Wide Short", 1.00, 0.25)
     );
 
@@ -820,15 +820,79 @@ public final class ToolscreenMobile implements ClientModInitializer {
         return toggleKey;
     }
 
-    /** Advances to the next mode and returns it. Caller is responsible for triggering a resize. */
-    public static Mode cycleMode() {
+    /**
+     * How soon a second press has to follow the last one to count as "next
+     * mode" rather than "back to normal".
+     */
+    private static final long CHAIN_WINDOW_MS = 2000;
+    private static volatile long lastTogglePress = Long.MIN_VALUE / 2;
+
+    /**
+     * Handles a press of the toggle key and returns the mode it selects. The
+     * caller triggers the resize.
+     *
+     * <p>From normal, a press goes to Eye Measure - the mode used most, so it is
+     * one press away. Further presses each within two seconds of the last step
+     * on through the other modes, and past the last one back to normal. A press
+     * after a longer gap goes straight back to normal from wherever it is, so
+     * leaving any mode is one press, never a walk round the whole cycle.
+     *
+     * <p>The order comes from the modes rather than their position in the
+     * list: measuring modes first, then the rest as listed. The list is saved
+     * in the config file, so relying on its order would have meant replacing
+     * every existing config - and the settings in it - to change the sequence.
+     */
+    public static Mode pressToggle(long nowMillis) {
+        long gap = nowMillis - lastTogglePress;
+        lastTogglePress = nowMillis;
+
         List<Mode> current = modes;
-        if (!current.isEmpty()) {
-            activeIndex = Math.floorMod(activeIndex + 1, current.size());
+        if (current.isEmpty()) return activeMode();
+
+        List<Integer> chain = pressOrder(current);
+        int nativeIndex = nativeIndex(current);
+        Mode active = activeMode();
+
+        if (chain.isEmpty()) {
+            activeIndex = nativeIndex;
+        } else if (active.isNative()) {
+            activeIndex = chain.get(0);
+        } else if (gap > CHAIN_WINDOW_MS) {
+            activeIndex = nativeIndex;
+        } else {
+            int position = chain.indexOf(Math.floorMod(activeIndex, current.size()));
+            activeIndex = position >= 0 && position + 1 < chain.size()
+                    ? chain.get(position + 1)
+                    : nativeIndex;
         }
+
         Mode mode = activeMode();
-        LOGGER.info("[{}] mode -> {}", MOD_ID, mode.name());
+        LOGGER.info("[{}] mode -> {} ({} ms since last press)", MOD_ID, mode.name(), gap);
         return mode;
+    }
+
+    /** Non-native modes in press order: measuring modes first, then the rest as listed. */
+    private static List<Integer> pressOrder(List<Mode> current) {
+        List<Integer> measuring = new java.util.ArrayList<>();
+        List<Integer> others = new java.util.ArrayList<>();
+        for (int i = 0; i < current.size(); i++) {
+            Mode mode = current.get(i);
+            if (mode.isNative()) continue;
+            boolean isMeasuring = false;
+            for (String name : eyeZoomModes) {
+                if (name.equalsIgnoreCase(mode.name())) isMeasuring = true;
+            }
+            (isMeasuring ? measuring : others).add(i);
+        }
+        measuring.addAll(others);
+        return measuring;
+    }
+
+    private static int nativeIndex(List<Mode> current) {
+        for (int i = 0; i < current.size(); i++) {
+            if (current.get(i).isNative()) return i;
+        }
+        return 0;
     }
 
     // ---- config -----------------------------------------------------------
